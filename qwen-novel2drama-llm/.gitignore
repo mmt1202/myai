@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.cache/
+models/
+saves/
+outputs/
+logs/
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.pth
+.DS_Store
+eval/results.jsonl
