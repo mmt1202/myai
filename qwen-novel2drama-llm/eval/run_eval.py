@@ -6,6 +6,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "inference"))
 from model_utils import generate_text, load_model, load_system_prompt  # noqa: E402

@@ -1,6 +1,7 @@
 {
   "novel2drama": {
     "file_name": "train.jsonl",
+    "validation_file_name": "val.jsonl",
     "formatting": "alpaca",
     "columns": {
       "prompt": "instruction",
