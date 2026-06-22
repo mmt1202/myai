@@ -4,6 +4,8 @@ param(
     [Parameter(Mandatory=$true)][string]$OutputPath
 )
 $ErrorActionPreference = "Stop"
+$ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+Set-Location $ProjectRoot
 if (-not (Get-Command llamafactory-cli -ErrorAction SilentlyContinue)) {
     Write-Error "未找到 llamafactory-cli。请先安装 LLaMA-Factory。"
 }

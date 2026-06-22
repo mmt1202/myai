@@ -6,6 +6,8 @@ finetuning_type: lora
 lora_target: all
 template: qwen
 dataset: novel2drama
+# 显式指定验证集，避免训练集和验证集混用
+eval_dataset: novel2drama_val
 dataset_dir: datasets
 cutoff_len: 2048
 max_samples: 20000

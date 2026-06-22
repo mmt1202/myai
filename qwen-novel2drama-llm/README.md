@@ -69,6 +69,8 @@ bash scripts/train_lora.sh
 
 训练数据只能使用你自己整理的数据，或未来使用符合许可的开源模型生成的数据。不要使用 GPT、Claude、Gemini 等闭源商业模型输出作为训练数据。
 
+`datasets/dataset_info.json` 同时注册了 `novel2drama` 和 `novel2drama_val`，训练配置通过 `eval_dataset: novel2drama_val` 显式使用验证集。
+
 ## 校验数据
 
 ```bash
@@ -92,7 +94,7 @@ python scripts/prepare_data.py --input-dir raw_novels --output datasets/raw_exam
 
 ## 开始训练
 
-训练依赖 LLaMA-Factory。安装并确认 `llamafactory-cli` 可用后运行：
+训练依赖 LLaMA-Factory。训练脚本会自动切换到项目根目录、校验 train/val 数据，并在 `llamafactory-cli` 不存在时给出安装提示。安装并确认 `llamafactory-cli` 可用后运行：
 
 ```bash
 bash scripts/train_lora.sh configs/qwen2_5_1_5b_lora.yaml
@@ -125,7 +127,7 @@ python inference/client_test.py
 
 ## 接入业务系统
 
-后端、PC 端、移动端可调用 `POST /generate`，传入 prompt、max_new_tokens、temperature，返回结构化生成结果。后续可扩展鉴权、队列、任务状态、模型路由和多端项目 ID。
+后端、PC 端、移动端可调用 `POST /generate`，传入 prompt、max_new_tokens、temperature，返回结构化生成结果。建议业务侧为每次生成保存：用户 ID、项目 ID、原始小说片段、提示词模板版本、模型版本、生成结果和人工评分。后续可扩展鉴权、队列、任务状态、模型路由和多端项目 ID。
 
 ## 显卡选型
 
