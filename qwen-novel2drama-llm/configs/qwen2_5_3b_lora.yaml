@@ -1,0 +1,35 @@
+# Qwen2.5-3B LoRA：适合 8GB-12GB 显存尝试
+model_name_or_path: Qwen/Qwen2.5-3B-Instruct
+stage: sft
+do_train: true
+do_eval: true
+finetuning_type: lora
+lora_target: all
+template: qwen
+dataset: novel2drama
+# 显式指定验证集，避免训练集和验证集混用
+eval_dataset: novel2drama_val
+dataset_dir: datasets
+cutoff_len: 2048
+max_samples: 20000
+overwrite_cache: true
+preprocessing_num_workers: 4
+output_dir: saves/qwen2_5_3b_lora
+overwrite_output_dir: true
+per_device_train_batch_size: 1
+per_device_eval_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 0.00015
+num_train_epochs: 3
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+logging_steps: 10
+save_steps: 100
+save_total_limit: 3
+eval_steps: 100
+plot_loss: true
+fp16: true
+# 3B 可略微提高 LoRA 秩，但仍保持保守
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.05
