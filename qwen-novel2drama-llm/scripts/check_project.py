@@ -24,6 +24,7 @@ REQUIRED_FILES = [
     "scripts/train_lora.sh",
     "scripts/merge_lora.ps1",
     "scripts/merge_lora.sh",
+    "inference/model_utils.py",
     "inference/chat.py",
     "inference/api_server.py",
     "inference/test_prompt.py",

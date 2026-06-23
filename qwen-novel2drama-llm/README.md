@@ -26,7 +26,7 @@ Qwen 系列中文能力强、生态完善、开源模型尺寸丰富，适合从
 datasets/   训练与验证 JSONL 数据
 configs/    LLaMA-Factory 训练配置
 scripts/    数据处理、项目检查、训练、合并脚本
-inference/  transformers 推理和 FastAPI 服务
+inference/  transformers 推理、共享模型工具和 FastAPI 服务
 prompts/    专业提示词模板
 eval/       人工评估辅助脚本
 docs/       训练、数据、Windows、选型文档
@@ -118,7 +118,7 @@ Windows：
 ## 本地推理
 
 ```bash
-python inference/chat.py --model-path Qwen/Qwen2.5-1.5B-Instruct
+python inference/chat.py --model-path Qwen/Qwen2.5-1.5B-Instruct --system-prompt-file prompts/system_prompt.txt
 ```
 
 加载 LoRA：
@@ -130,7 +130,7 @@ python inference/chat.py --model-path Qwen/Qwen2.5-1.5B-Instruct --adapter-path 
 ## 启动 API 服务
 
 ```bash
-python inference/api_server.py --model-path Qwen/Qwen2.5-1.5B-Instruct --host 127.0.0.1 --port 8000
+python inference/api_server.py --model-path Qwen/Qwen2.5-1.5B-Instruct --system-prompt-file prompts/system_prompt.txt --host 127.0.0.1 --port 8000
 python inference/client_test.py
 ```
 
