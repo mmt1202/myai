@@ -16,7 +16,15 @@ pip install -r requirements.txt
 llamafactory-cli --help
 ```
 
-## 3. 数据准备
+## 3. 项目静态检查
+
+```bash
+python scripts/check_project.py --project-root .
+```
+
+该命令会检查必要文件、`dataset_info.json`、训练配置中的 `eval_dataset`，以及是否误放入模型权重文件。
+
+## 4. 数据准备
 
 ```bash
 python scripts/validate_dataset.py --file datasets/train.jsonl
@@ -29,13 +37,13 @@ python scripts/validate_dataset.py --file datasets/val.jsonl
 python scripts/prepare_data.py --input-dir raw_novels --output datasets/raw_examples.jsonl --chunk-size 1200
 ```
 
-## 4. 选择模型
+## 5. 选择模型
 
 - 第一次跑通：`configs/qwen2_5_1_5b_lora.yaml`
 - 8GB-12GB：`configs/qwen2_5_3b_lora.yaml`
 - 16GB-24GB：`configs/qwen2_5_7b_qlora.yaml`
 
-## 5. 开始训练
+## 6. 开始训练
 
 Windows：
 
@@ -49,7 +57,7 @@ Linux/macOS：
 bash scripts/train_lora.sh configs/qwen2_5_1_5b_lora.yaml
 ```
 
-## 6. 训练后检查
+## 7. 训练后检查
 
 关注：
 
@@ -58,7 +66,7 @@ bash scripts/train_lora.sh configs/qwen2_5_1_5b_lora.yaml
 - 生成结果是否结构化。
 - 是否出现复读、乱码、格式漂移。
 
-## 7. 合并/导出 LoRA
+## 8. 合并/导出 LoRA
 
 ```bash
 bash scripts/merge_lora.sh Qwen/Qwen2.5-1.5B-Instruct saves/qwen2_5_1_5b_lora outputs/merged-qwen-novel2drama

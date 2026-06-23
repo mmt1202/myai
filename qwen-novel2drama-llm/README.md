@@ -25,7 +25,7 @@ Qwen 系列中文能力强、生态完善、开源模型尺寸丰富，适合从
 ```text
 datasets/   训练与验证 JSONL 数据
 configs/    LLaMA-Factory 训练配置
-scripts/    数据处理、训练、合并脚本
+scripts/    数据处理、项目检查、训练、合并脚本
 inference/  transformers 推理和 FastAPI 服务
 prompts/    专业提示词模板
 eval/       人工评估辅助脚本
@@ -70,6 +70,15 @@ bash scripts/train_lora.sh
 训练数据只能使用你自己整理的数据，或未来使用符合许可的开源模型生成的数据。不要使用 GPT、Claude、Gemini 等闭源商业模型输出作为训练数据。
 
 `datasets/dataset_info.json` 同时注册了 `novel2drama` 和 `novel2drama_val`，训练配置通过 `eval_dataset: novel2drama_val` 显式使用验证集。
+
+
+## 项目静态检查
+
+在训练前建议先运行项目级检查，确认关键文件、数据集注册、训练配置和模型权重忽略规则没有问题：
+
+```bash
+python scripts/check_project.py --project-root .
+```
 
 ## 校验数据
 
