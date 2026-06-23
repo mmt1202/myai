@@ -146,6 +146,18 @@ python -m unittest discover -s tests
 python scripts/run_checks.py --project-root .
 ```
 
+
+## 环境诊断
+
+训练前可以先检查 Python、依赖、CUDA 和 LLaMA-Factory 命令是否可用：
+
+```bash
+python scripts/check_environment.py
+python scripts/check_environment.py --check-torch
+```
+
+LLaMA-Factory 安装和排错见 `docs/llamafactory_setup.md`。
+
 ## 开始训练
 
 训练依赖 LLaMA-Factory。训练脚本会自动切换到项目根目录、校验 train/val 数据，并在 `llamafactory-cli` 不存在时给出安装提示。安装并确认 `llamafactory-cli` 可用后运行：

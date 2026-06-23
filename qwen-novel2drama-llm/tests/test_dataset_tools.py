@@ -19,6 +19,7 @@ from analyze_dataset import analyze  # noqa: E402
 from dedupe_dataset import dedupe  # noqa: E402
 from sample_dataset import sample_lines  # noqa: E402
 from corpus_to_sft_template import convert_corpus  # noqa: E402
+from check_environment import build_report  # noqa: E402
 
 sys.path.insert(0, str(PROJECT_ROOT / "eval"))
 from compare_results import compare  # noqa: E402
@@ -120,6 +121,12 @@ class DatasetToolTests(unittest.TestCase):
             self.assertEqual(record["instruction"], "任务")
             self.assertEqual(record["output"], "")
             self.assertEqual(record["source_url"], "https://example.com/a")
+
+    def test_check_environment_report_has_expected_sections(self) -> None:
+        report = build_report(check_torch=False)
+        self.assertIn("python", report)
+        self.assertIn("executables", report)
+        self.assertIn("packages_found", report)
 
     def test_project_checker_current_project(self) -> None:
         self.assertEqual(collect_errors(PROJECT_ROOT), [])
