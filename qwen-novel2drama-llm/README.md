@@ -113,6 +113,19 @@ python scripts/prepare_data.py --input-dir raw_novels --output datasets/raw_exam
 生成的 `output` 为空，需要人工补写高质量答案后再训练。
 
 
+
+## 数据质量分析、去重和抽样
+
+训练前建议先分析数据质量，并抽样人工复核：
+
+```bash
+python scripts/analyze_dataset.py --file datasets/train.jsonl --output outputs/train_report.json
+python scripts/dedupe_dataset.py --input datasets/train.jsonl --output outputs/train.dedup.jsonl --mode instruction_input
+python scripts/sample_dataset.py --input datasets/train.jsonl --output outputs/sample_review.jsonl --size 20 --seed 42
+```
+
+标注规范见 `docs/annotation_guide.md`，人工评估标准见 `eval/scoring_guide.md`。
+
 ## 运行轻量测试
 
 项目包含基于 `unittest` 的轻量测试，不需要下载模型：
@@ -160,9 +173,32 @@ python inference/api_server.py --model-path Qwen/Qwen2.5-1.5B-Instruct --system-
 python inference/client_test.py
 ```
 
+
+## 评估结果对比
+
+训练前后可以分别运行 `eval/run_eval.py` 生成 JSONL，然后对比：
+
+```bash
+python eval/compare_results.py --base eval/base_results.jsonl --candidate eval/lora_results.jsonl --output eval/compare_results.csv
+```
+
 ## 接入业务系统
 
 后端、PC 端、移动端可调用 `POST /generate`，传入 prompt、max_new_tokens、temperature，返回结构化生成结果。建议业务侧为每次生成保存：用户 ID、项目 ID、原始小说片段、提示词模板版本、模型版本、生成结果和人工评分。后续可扩展鉴权、队列、任务状态、模型路由和多端项目 ID。
+
+
+## 依赖分层
+
+第一版保留 `requirements.txt` 作为全量入门依赖，同时提供分层依赖：
+
+- `requirements-train.txt`：训练相关依赖。
+- `requirements-api.txt`：本地 API 推理服务依赖。
+- `requirements-dev.txt`：开发和轻量测试依赖。
+- `requirements-windows.txt`：Windows 入口说明，bitsandbytes 不兼容时建议 WSL2/Linux。
+
+## 部署预留
+
+已提供 `Dockerfile` 和 `deploy/` 文档，预留 Docker、vLLM、Ollama、GGUF 路线。第一版不会自动下载、转换或提交任何模型权重。
 
 ## 显卡选型
 
