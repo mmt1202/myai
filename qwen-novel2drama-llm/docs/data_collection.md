@@ -53,9 +53,16 @@ python scripts/collect_web_text.py --sources datasets/sources.example.jsonl --ou
 
 1. 人工确认授权和正文质量。
 2. 将长文本切成小说片段。
-3. 人工写 `instruction/input/output`。
-4. 运行 `validate_dataset.py`。
-5. 运行 `analyze/dedupe` 类工具做数据质量检查。
+3. 运行 `corpus_to_sft_template.py` 生成待标注模板。
+4. 人工补写 `output`，并按任务类型调整 `instruction`。
+5. 运行 `validate_dataset.py`。
+6. 运行 `analyze/dedupe/sample` 类工具做数据质量检查。
+
+转换命令：
+
+```bash
+python scripts/corpus_to_sft_template.py --input datasets/raw_corpus.jsonl --output datasets/annotation_todo.jsonl --chunk-size 1200
+```
 
 ## 重要提醒
 

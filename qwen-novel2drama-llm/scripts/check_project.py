@@ -36,6 +36,7 @@ REQUIRED_FILES = [
     "scripts/prepare_data.py",
     "scripts/analyze_dataset.py",
     "scripts/collect_web_text.py",
+    "scripts/corpus_to_sft_template.py",
     "scripts/dedupe_dataset.py",
     "scripts/run_checks.py",
     "scripts/sample_dataset.py",

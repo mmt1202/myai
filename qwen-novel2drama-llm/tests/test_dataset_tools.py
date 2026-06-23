@@ -18,6 +18,7 @@ from collect_web_text import html_to_text, load_sources  # noqa: E402
 from analyze_dataset import analyze  # noqa: E402
 from dedupe_dataset import dedupe  # noqa: E402
 from sample_dataset import sample_lines  # noqa: E402
+from corpus_to_sft_template import convert_corpus  # noqa: E402
 
 sys.path.insert(0, str(PROJECT_ROOT / "eval"))
 from compare_results import compare  # noqa: E402
@@ -107,6 +108,18 @@ class DatasetToolTests(unittest.TestCase):
             csv_text = output_path.read_text(encoding="utf-8-sig")
             self.assertIn("base_response", csv_text)
             self.assertIn("candidate", csv_text)
+
+    def test_corpus_to_sft_template_preserves_source_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = Path(tmpdir) / "raw_corpus.jsonl"
+            output_path = Path(tmpdir) / "todo.jsonl"
+            raw = {"url": "https://example.com/a", "source_name": "demo", "license": "owned", "text": "第一段内容。\n第二段内容。"}
+            input_path.write_text(json.dumps(raw, ensure_ascii=False) + "\n", encoding="utf-8")
+            self.assertEqual(convert_corpus(input_path, output_path, "任务", chunk_size=100), 1)
+            record = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(record["instruction"], "任务")
+            self.assertEqual(record["output"], "")
+            self.assertEqual(record["source_url"], "https://example.com/a")
 
     def test_project_checker_current_project(self) -> None:
         self.assertEqual(collect_errors(PROJECT_ROOT), [])

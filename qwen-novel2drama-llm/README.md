@@ -104,6 +104,12 @@ python scripts/collect_web_text.py --sources datasets/sources.example.jsonl --ou
 
 采集脚本默认检查 `robots.txt`，并要求来源清单显式声明 `allow_training: true` 和授权说明。未授权小说站、付费章节、盗版内容不要用于训练。详细说明见 `docs/data_collection.md`。
 
+采集后可以转换为待人工标注模板：
+
+```bash
+python scripts/corpus_to_sft_template.py --input datasets/raw_corpus.jsonl --output datasets/annotation_todo.jsonl --chunk-size 1200
+```
+
 ## 准备小说数据
 
 ```bash
