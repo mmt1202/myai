@@ -113,19 +113,6 @@ python scripts/prepare_data.py --input-dir raw_novels --output datasets/raw_exam
 生成的 `output` 为空，需要人工补写高质量答案后再训练。
 
 
-
-## 数据质量分析、去重和抽样
-
-训练前建议先分析数据质量，并抽样人工复核：
-
-```bash
-python scripts/analyze_dataset.py --file datasets/train.jsonl --output outputs/train_report.json
-python scripts/dedupe_dataset.py --input datasets/train.jsonl --output outputs/train.dedup.jsonl --mode instruction_input
-python scripts/sample_dataset.py --input datasets/train.jsonl --output outputs/sample_review.jsonl --size 20 --seed 42
-```
-
-标注规范见 `docs/annotation_guide.md`，人工评估标准见 `eval/scoring_guide.md`。
-
 ## 运行轻量测试
 
 项目包含基于 `unittest` 的轻量测试，不需要下载模型：

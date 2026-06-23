@@ -15,9 +15,6 @@ from prepare_data import chunk_text  # noqa: E402
 from split_dataset import read_lines, write_lines  # noqa: E402
 from validate_dataset import validate_file  # noqa: E402
 from collect_web_text import html_to_text, load_sources  # noqa: E402
-from analyze_dataset import analyze  # noqa: E402
-from dedupe_dataset import dedupe  # noqa: E402
-from sample_dataset import sample_lines  # noqa: E402
 
 
 class DatasetToolTests(unittest.TestCase):
@@ -61,37 +58,6 @@ class DatasetToolTests(unittest.TestCase):
             path.write_text(json.dumps({"url": "https://example.com", "license": "unknown"}) + "\n", encoding="utf-8")
             with self.assertRaises(ValueError):
                 load_sources(path)
-
-    def test_analyze_reports_duplicate_inputs(self) -> None:
-        records = [
-            {"instruction": "任务A", "input": "相同", "output": "这是一个足够长的输出。"},
-            {"instruction": "任务B", "input": "相同", "output": "这是另一个足够长的输出。"},
-        ]
-        report = analyze(records, top_k=5)
-        self.assertEqual(report["total"], 2)
-        self.assertEqual(report["duplicate_input_count"], 1)
-
-    def test_dedupe_dataset_by_input(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            input_path = Path(tmpdir) / "input.jsonl"
-            output_path = Path(tmpdir) / "output.jsonl"
-            rows = [
-                {"instruction": "A", "input": "重复", "output": "1"},
-                {"instruction": "B", "input": "重复", "output": "2"},
-            ]
-            input_path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
-            total, kept = dedupe(input_path, output_path, mode="input")
-            self.assertEqual((total, kept), (2, 1))
-
-    def test_sample_dataset_is_deterministic(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            input_path = Path(tmpdir) / "input.jsonl"
-            output_a = Path(tmpdir) / "a.jsonl"
-            output_b = Path(tmpdir) / "b.jsonl"
-            input_path.write_text("\n".join(["{\"i\": 1}", "{\"i\": 2}", "{\"i\": 3}"]) + "\n", encoding="utf-8")
-            self.assertEqual(sample_lines(input_path, output_a, size=2, seed=7), 2)
-            self.assertEqual(sample_lines(input_path, output_b, size=2, seed=7), 2)
-            self.assertEqual(output_a.read_text(encoding="utf-8"), output_b.read_text(encoding="utf-8"))
 
     def test_project_checker_current_project(self) -> None:
         self.assertEqual(collect_errors(PROJECT_ROOT), [])

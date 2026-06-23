@@ -25,7 +25,6 @@ def main() -> int:
         [python, "scripts/check_project.py", "--project-root", "."],
         [python, "scripts/validate_dataset.py", "--file", "datasets/train.jsonl"],
         [python, "scripts/validate_dataset.py", "--file", "datasets/val.jsonl"],
-        [python, "scripts/analyze_dataset.py", "--file", "datasets/train.jsonl"],
         [python, "-m", "unittest", "discover", "-s", "tests"],
     ]
     if not args.skip_compile:

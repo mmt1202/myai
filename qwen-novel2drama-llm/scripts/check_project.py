@@ -8,8 +8,6 @@ from pathlib import Path
 
 REQUIRED_FILES = [
     "README.md",
-    ".github/workflows/checks.yml",
-    "docs/annotation_guide.md",
     "docs/data_collection.md",
     "docs/data_format.md",
     "requirements.txt",
@@ -25,11 +23,8 @@ REQUIRED_FILES = [
     "scripts/validate_dataset.py",
     "scripts/split_dataset.py",
     "scripts/prepare_data.py",
-    "scripts/analyze_dataset.py",
     "scripts/collect_web_text.py",
-    "scripts/dedupe_dataset.py",
     "scripts/run_checks.py",
-    "scripts/sample_dataset.py",
     "scripts/train_lora.ps1",
     "scripts/train_lora.sh",
     "scripts/merge_lora.ps1",
@@ -40,9 +35,7 @@ REQUIRED_FILES = [
     "inference/test_prompt.py",
     "inference/client_test.py",
     "eval/eval_prompts.jsonl",
-    "eval/manual_eval_template.csv",
     "eval/run_eval.py",
-    "eval/scoring_guide.md",
     "tests/test_dataset_tools.py",
 ]
 
