@@ -1,0 +1,2 @@
+# Windows 用户可先安装基础依赖；bitsandbytes 如不可用，建议使用 WSL2 或 Linux 训练。
+-r requirements.txt
