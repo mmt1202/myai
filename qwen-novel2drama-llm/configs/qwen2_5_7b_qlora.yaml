@@ -27,7 +27,6 @@ logging_steps: 10
 save_steps: 100
 save_total_limit: 3
 eval_steps: 100
-val_size: 0.05
 plot_loss: true
 fp16: true
 # QLoRA 关键参数：4bit 量化加载底座模型，显著降低显存占用

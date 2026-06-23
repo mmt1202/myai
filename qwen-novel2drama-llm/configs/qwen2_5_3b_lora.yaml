@@ -27,7 +27,6 @@ logging_steps: 10
 save_steps: 100
 save_total_limit: 3
 eval_steps: 100
-val_size: 0.05
 plot_loss: true
 fp16: true
 # 3B 可略微提高 LoRA 秩，但仍保持保守
