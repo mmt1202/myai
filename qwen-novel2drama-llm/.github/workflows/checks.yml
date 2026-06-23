@@ -1,0 +1,20 @@
+name: qwen-novel2drama checks
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  lightweight-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run lightweight project checks
+        working-directory: qwen-novel2drama-llm
+        run: python scripts/run_checks.py --project-root .
