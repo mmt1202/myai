@@ -43,7 +43,15 @@ python scripts/prepare_data.py --input-dir raw_novels --output datasets/raw_exam
 - 8GB-12GB：`configs/qwen2_5_3b_lora.yaml`
 - 16GB-24GB：`configs/qwen2_5_7b_qlora.yaml`
 
-## 6. 开始训练
+## 6. 运行轻量测试
+
+```bash
+python -m unittest discover -s tests
+```
+
+该测试只覆盖数据工具和项目检查，不会下载模型，也不会启动训练。
+
+## 7. 开始训练
 
 Windows：
 
@@ -57,7 +65,7 @@ Linux/macOS：
 bash scripts/train_lora.sh configs/qwen2_5_1_5b_lora.yaml
 ```
 
-## 7. 训练后检查
+## 8. 训练后检查
 
 关注：
 
@@ -66,7 +74,7 @@ bash scripts/train_lora.sh configs/qwen2_5_1_5b_lora.yaml
 - 生成结果是否结构化。
 - 是否出现复读、乱码、格式漂移。
 
-## 8. 合并/导出 LoRA
+## 9. 合并/导出 LoRA
 
 ```bash
 bash scripts/merge_lora.sh Qwen/Qwen2.5-1.5B-Instruct saves/qwen2_5_1_5b_lora outputs/merged-qwen-novel2drama

@@ -101,6 +101,15 @@ python scripts/prepare_data.py --input-dir raw_novels --output datasets/raw_exam
 
 生成的 `output` 为空，需要人工补写高质量答案后再训练。
 
+
+## 运行轻量测试
+
+项目包含基于 `unittest` 的轻量测试，不需要下载模型：
+
+```bash
+python -m unittest discover -s tests
+```
+
 ## 开始训练
 
 训练依赖 LLaMA-Factory。训练脚本会自动切换到项目根目录、校验 train/val 数据，并在 `llamafactory-cli` 不存在时给出安装提示。安装并确认 `llamafactory-cli` 可用后运行：

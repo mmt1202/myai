@@ -31,6 +31,7 @@ REQUIRED_FILES = [
     "inference/client_test.py",
     "eval/eval_prompts.jsonl",
     "eval/run_eval.py",
+    "tests/test_dataset_tools.py",
 ]
 
 FORBIDDEN_SUFFIXES = {".bin", ".safetensors", ".gguf", ".pt", ".pth"}
