@@ -1,0 +1,11 @@
+{
+  "description": "小说转短剧 SFT 数据任务配比建议，可用于 500/1000/3000 条阶段性数据建设。",
+  "tasks": [
+    {"task_type": "novel_to_storyboard", "name": "小说片段 → 60 秒分镜脚本", "ratio": 0.30},
+    {"task_type": "chapter_to_outline", "name": "小说章节 → 10 集短剧大纲", "ratio": 0.15},
+    {"task_type": "character_profile", "name": "人物描写 → 角色一致性设定", "ratio": 0.15},
+    {"task_type": "hook_reversal", "name": "剧情摘要 → 爽点/反转/钩子", "ratio": 0.15},
+    {"task_type": "storyboard_to_video_prompt", "name": "分镜 → AI 视频提示词", "ratio": 0.15},
+    {"task_type": "plot_to_dubbing", "name": "剧情 → 配音台词", "ratio": 0.10}
+  ]
+}

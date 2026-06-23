@@ -20,6 +20,7 @@ from dedupe_dataset import dedupe  # noqa: E402
 from sample_dataset import sample_lines  # noqa: E402
 from corpus_to_sft_template import convert_corpus  # noqa: E402
 from check_environment import build_report  # noqa: E402
+from plan_dataset_mix import load_mix, plan_counts  # noqa: E402
 
 sys.path.insert(0, str(PROJECT_ROOT / "eval"))
 from compare_results import compare  # noqa: E402
@@ -127,6 +128,12 @@ class DatasetToolTests(unittest.TestCase):
         self.assertIn("python", report)
         self.assertIn("executables", report)
         self.assertIn("packages_found", report)
+
+    def test_plan_dataset_mix_counts_total(self) -> None:
+        tasks = load_mix(PROJECT_ROOT / "datasets" / "task_mix.json")
+        rows = plan_counts(tasks, total=500)
+        self.assertEqual(sum(row["target_count"] for row in rows), 500)
+        self.assertEqual(rows[0]["task_type"], "novel_to_storyboard")
 
     def test_project_checker_current_project(self) -> None:
         self.assertEqual(collect_errors(PROJECT_ROOT), [])

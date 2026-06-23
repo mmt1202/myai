@@ -120,6 +120,18 @@ python scripts/prepare_data.py --input-dir raw_novels --output datasets/raw_exam
 
 
 
+
+## 数据集建设计划
+
+数据任务比例配置在 `datasets/task_mix.json`，可以按 500/1000/3000 条目标生成建设计划：
+
+```bash
+python scripts/plan_dataset_mix.py --total 500
+python scripts/plan_dataset_mix.py --total 1000 --output outputs/dataset_plan_1000.json
+```
+
+详细说明见 `docs/dataset_plan.md`。
+
 ## 数据质量分析、去重和抽样
 
 训练前建议先分析数据质量，并抽样人工复核：
