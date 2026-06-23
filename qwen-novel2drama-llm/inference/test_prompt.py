@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import argparse
-from chat import generate, load_model
+
+from model_utils import generate_text, load_model, load_system_prompt
 
 from model_utils import generate_text, load_model, load_system_prompt
 

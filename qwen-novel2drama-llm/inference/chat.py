@@ -2,11 +2,6 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any
-
-import torch
-from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from model_utils import generate_text, load_model, load_system_prompt
 SYSTEM_PROMPT = "你是专业 AI 短剧编剧、短视频分镜导演、AI 视频生成提示词专家。"

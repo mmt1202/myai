@@ -5,7 +5,6 @@ import argparse
 from typing import Any
 
 import uvicorn
-from chat import generate, load_model
 from fastapi import FastAPI, HTTPException
 from model_utils import generate_text, load_model, load_system_prompt
 from pydantic import BaseModel, Field
