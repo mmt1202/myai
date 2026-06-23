@@ -20,6 +20,7 @@ REQUIRED_FILES = [
     "scripts/validate_dataset.py",
     "scripts/split_dataset.py",
     "scripts/prepare_data.py",
+    "scripts/run_checks.py",
     "scripts/train_lora.ps1",
     "scripts/train_lora.sh",
     "scripts/merge_lora.ps1",

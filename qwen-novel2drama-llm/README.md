@@ -110,6 +110,12 @@ python scripts/prepare_data.py --input-dir raw_novels --output datasets/raw_exam
 python -m unittest discover -s tests
 ```
 
+也可以一次性运行项目检查、数据校验、单元测试和语法检查：
+
+```bash
+python scripts/run_checks.py --project-root .
+```
+
 ## 开始训练
 
 训练依赖 LLaMA-Factory。训练脚本会自动切换到项目根目录、校验 train/val 数据，并在 `llamafactory-cli` 不存在时给出安装提示。安装并确认 `llamafactory-cli` 可用后运行：

@@ -51,6 +51,12 @@ python -m unittest discover -s tests
 
 该测试只覆盖数据工具和项目检查，不会下载模型，也不会启动训练。
 
+推荐训练前直接运行完整轻量检查：
+
+```bash
+python scripts/run_checks.py --project-root .
+```
+
 ## 7. 开始训练
 
 Windows：
