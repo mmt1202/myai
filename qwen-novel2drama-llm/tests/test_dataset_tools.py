@@ -14,6 +14,7 @@ from check_project import collect_errors  # noqa: E402
 from prepare_data import chunk_text  # noqa: E402
 from split_dataset import read_lines, write_lines  # noqa: E402
 from validate_dataset import validate_file  # noqa: E402
+from collect_web_text import html_to_text, load_sources  # noqa: E402
 
 
 class DatasetToolTests(unittest.TestCase):
@@ -43,6 +44,20 @@ class DatasetToolTests(unittest.TestCase):
         chunks = chunk_text("第一段。\n\n第二段很长很长。", chunk_size=6)
         self.assertTrue(chunks)
         self.assertTrue(all(len(chunk) <= 6 for chunk in chunks))
+
+    def test_html_to_text_removes_script_content(self) -> None:
+        html = "<html><body><h1>标题</h1><script>bad()</script><p>正文内容足够清晰。</p></body></html>"
+        text = html_to_text(html)
+        self.assertIn("标题", text)
+        self.assertIn("正文内容", text)
+        self.assertNotIn("bad()", text)
+
+    def test_load_sources_requires_training_permission(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "sources.jsonl"
+            path.write_text(json.dumps({"url": "https://example.com", "license": "unknown"}) + "\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_sources(path)
 
     def test_project_checker_current_project(self) -> None:
         self.assertEqual(collect_errors(PROJECT_ROOT), [])

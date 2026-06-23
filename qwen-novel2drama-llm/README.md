@@ -93,6 +93,17 @@ python scripts/validate_dataset.py --file datasets/val.jsonl
 python scripts/split_dataset.py --input datasets/raw_examples.jsonl --train datasets/train.jsonl --val datasets/val.jsonl --val-ratio 0.1 --seed 42
 ```
 
+
+## 合规采集真实语料
+
+如果你拥有小说版权或已获得训练授权，可以先维护来源清单，再采集网页正文：
+
+```bash
+python scripts/collect_web_text.py --sources datasets/sources.example.jsonl --output datasets/raw_corpus.jsonl
+```
+
+采集脚本默认检查 `robots.txt`，并要求来源清单显式声明 `allow_training: true` 和授权说明。未授权小说站、付费章节、盗版内容不要用于训练。详细说明见 `docs/data_collection.md`。
+
 ## 准备小说数据
 
 ```bash

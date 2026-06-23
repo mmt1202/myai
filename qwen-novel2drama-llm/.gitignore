@@ -13,3 +13,6 @@ logs/
 *.pth
 .DS_Store
 eval/results.jsonl
+raw_novels/
+datasets/raw_corpus.jsonl
+datasets/collected_*.jsonl
