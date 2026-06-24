@@ -27,7 +27,7 @@ datasets/   训练与验证 JSONL 数据
 configs/    LLaMA-Factory 训练配置
 scripts/    数据处理、项目检查、训练、合并脚本
 inference/  transformers 推理、共享模型工具和 FastAPI 服务
-prompts/    专业提示词模板
+prompts/    专业提示词模板（大纲、角色、场景、分镜、视频、配音、钩子反转）
 eval/       人工评估辅助脚本
 docs/       训练、数据、Windows、选型文档
 ```
@@ -71,6 +71,19 @@ bash scripts/train_lora.sh
 
 `datasets/dataset_info.json` 同时注册了 `novel2drama` 和 `novel2drama_val`，训练配置通过 `eval_dataset: novel2drama_val` 显式使用验证集。
 
+
+## 专业提示词模板
+
+`prompts/` 目录提供可直接复制到本地推理、API 调用或标注流程中的模板：
+
+- `system_prompt.txt`：通用系统角色和工作原则。
+- `novel_to_drama_prompt.txt`：小说转短剧大纲。
+- `character_prompt.txt`：角色卡和一致性关键词。
+- `scene_prompt.txt`：场景卡、空间布局、光线和竖屏构图。
+- `storyboard_prompt.txt`：镜头级竖屏分镜脚本。
+- `video_prompt.txt`：即梦 AI / 可灵 AI / Runway / Pika 视频提示词。
+- `dubbing_prompt.txt`：AI 配音台词表。
+- `hook_twist_prompt.txt`：前 3 秒钩子、爽点和反转设计。
 
 ## 项目静态检查
 
