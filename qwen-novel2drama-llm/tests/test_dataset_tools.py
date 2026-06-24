@@ -6,10 +6,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
+import check_project  # noqa: E402
 from check_project import collect_errors  # noqa: E402
 from prepare_data import chunk_text  # noqa: E402
 from split_dataset import read_lines, write_lines  # noqa: E402
@@ -138,6 +140,37 @@ class DatasetToolTests(unittest.TestCase):
     def test_project_checker_current_project(self) -> None:
         self.assertEqual(collect_errors(PROJECT_ROOT), [])
 
+    def test_project_checker_rejects_conflicting_closed_model_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            docs_dir = project_root / "docs"
+            docs_dir.mkdir(parents=True)
+            (project_root / "README.md").write_text("项目说明", encoding="utf-8")
+            (docs_dir / "data_format.md").write_text(
+                "GPT 生成内容可以用于训练数据。",
+                encoding="utf-8",
+            )
+
+            with patch.object(check_project, "REQUIRED_FILES", ["README.md", "docs/data_format.md"]):
+                errors = collect_errors(project_root)
+
+            self.assertTrue(any("冲突的数据来源说明" in error for error in errors))
+
+    def test_project_checker_accepts_compliant_closed_model_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            docs_dir = project_root / "docs"
+            docs_dir.mkdir(parents=True)
+            (project_root / "README.md").write_text("不要使用闭源商业模型输出作为训练数据。", encoding="utf-8")
+            (docs_dir / "data_format.md").write_text(
+                "不要使用 GPT、Claude、Gemini 等闭源商业模型的输出作为训练数据。",
+                encoding="utf-8",
+            )
+
+            with patch.object(check_project, "REQUIRED_FILES", ["README.md", "docs/data_format.md"]):
+                errors = collect_errors(project_root)
+
+            self.assertFalse(any("冲突的数据来源说明" in error for error in errors))
 
 if __name__ == "__main__":
     unittest.main()
