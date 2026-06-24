@@ -72,6 +72,9 @@ REQUIRED_FILES = [
 
 FORBIDDEN_SUFFIXES = {".bin", ".safetensors", ".gguf", ".pt", ".pth"}
 REQUIRED_DATASETS = {"novel2drama": "train.jsonl", "novel2drama_val": "val.jsonl"}
+FORBIDDEN_POLICY_PHRASES = [
+    "可以使用 GPT、Claude、Gemini 等闭源商业模型的输出作为训练数据",
+]
 
 
 def collect_errors(project_root: Path) -> list[str]:
@@ -111,6 +114,14 @@ def collect_errors(project_root: Path) -> list[str]:
                 errors.append(f"配置 {config_path.name} 缺少：{required}")
         if "eval_dataset: novel2drama_val" not in text:
             errors.append(f"配置 {config_path.name} 未显式指定 eval_dataset: novel2drama_val")
+
+    for doc_path in [project_root / "README.md", *sorted((project_root / "docs").glob("*.md"))]:
+        if not doc_path.exists():
+            continue
+        text = doc_path.read_text(encoding="utf-8")
+        for phrase in FORBIDDEN_POLICY_PHRASES:
+            if phrase in text:
+                errors.append(f"文档 {doc_path.relative_to(project_root)} 包含冲突的数据来源说明：{phrase}")
 
     return errors
 

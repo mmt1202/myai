@@ -138,6 +138,102 @@ class DatasetToolTests(unittest.TestCase):
     def test_project_checker_current_project(self) -> None:
         self.assertEqual(collect_errors(PROJECT_ROOT), [])
 
+    def test_project_checker_rejects_conflicting_closed_model_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            for relative_path in (
+                "README.md",
+                ".github/workflows/checks.yml",
+                "docs/annotation_guide.md",
+                "docs/data_collection.md",
+                "deploy/README.md",
+                "deploy/gguf_export.md",
+                "deploy/ollama_export.md",
+                "deploy/vllm_server.md",
+                "docs/data_format.md",
+                "docs/dataset_plan.md",
+                "docs/llamafactory_setup.md",
+                "requirements.txt",
+                "requirements-api.txt",
+                "requirements-dev.txt",
+                "requirements-train.txt",
+                "requirements-windows.txt",
+                ".gitignore",
+                "Dockerfile",
+                "datasets/train.jsonl",
+                "datasets/val.jsonl",
+                "datasets/raw_examples.jsonl",
+                "datasets/sources.example.jsonl",
+                "datasets/task_mix.json",
+                "configs/qwen2_5_1_5b_lora.yaml",
+                "configs/qwen2_5_3b_lora.yaml",
+                "configs/qwen2_5_7b_qlora.yaml",
+                "scripts/validate_dataset.py",
+                "scripts/split_dataset.py",
+                "scripts/prepare_data.py",
+                "scripts/analyze_dataset.py",
+                "scripts/collect_web_text.py",
+                "scripts/corpus_to_sft_template.py",
+                "scripts/dedupe_dataset.py",
+                "scripts/check_environment.py",
+                "scripts/run_checks.py",
+                "scripts/sample_dataset.py",
+                "scripts/train_lora.ps1",
+                "scripts/train_lora.sh",
+                "scripts/plan_dataset_mix.py",
+                "scripts/merge_lora.ps1",
+                "scripts/merge_lora.sh",
+                "inference/model_utils.py",
+                "inference/chat.py",
+                "inference/api_server.py",
+                "inference/test_prompt.py",
+                "inference/client_test.py",
+                "prompts/system_prompt.txt",
+                "prompts/novel_to_drama_prompt.txt",
+                "prompts/character_prompt.txt",
+                "prompts/scene_prompt.txt",
+                "prompts/storyboard_prompt.txt",
+                "prompts/video_prompt.txt",
+                "prompts/dubbing_prompt.txt",
+                "prompts/hook_twist_prompt.txt",
+                "eval/eval_prompts.jsonl",
+                "eval/compare_results.py",
+                "eval/manual_eval_template.csv",
+                "eval/run_eval.py",
+                "eval/scoring_guide.md",
+                "tests/test_dataset_tools.py",
+            ):
+                path = project_root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("placeholder", encoding="utf-8")
+            (project_root / "datasets" / "dataset_info.json").write_text(
+                json.dumps(
+                    {
+                        "novel2drama": {
+                            "file_name": "train.jsonl",
+                            "columns": {"prompt": "instruction", "query": "input", "response": "output"},
+                        },
+                        "novel2drama_val": {
+                            "file_name": "val.jsonl",
+                            "columns": {"prompt": "instruction", "query": "input", "response": "output"},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            for config_path in (project_root / "configs").glob("*.yaml"):
+                config_path.write_text(
+                    "stage: sft\nfinetuning_type: lora\ntemplate: qwen\ndataset: novel2drama\neval_dataset: novel2drama_val\n",
+                    encoding="utf-8",
+                )
+            (project_root / "docs" / "data_format.md").write_text(
+                "可以使用 GPT、Claude、Gemini 等闭源商业模型的输出作为训练数据。",
+                encoding="utf-8",
+            )
+
+            self.assertTrue(any("冲突的数据来源说明" in error for error in collect_errors(project_root)))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,8 +5,6 @@ import argparse
 
 from model_utils import generate_text, load_model, load_system_prompt
 
-from model_utils import generate_text, load_model, load_system_prompt
-
 TEST_PROMPTS = [
     "请把小说片段改成短剧大纲：女主在订婚宴被背叛，转身联手神秘投资人复仇。",
     "请生成竖屏分镜：雨夜别墅外，女主被赶出家门，男主递出名片。",
