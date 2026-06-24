@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -72,9 +73,23 @@ REQUIRED_FILES = [
 
 FORBIDDEN_SUFFIXES = {".bin", ".safetensors", ".gguf", ".pt", ".pth"}
 REQUIRED_DATASETS = {"novel2drama": "train.jsonl", "novel2drama_val": "val.jsonl"}
-FORBIDDEN_POLICY_PHRASES = [
-    "可以使用 GPT、Claude、Gemini 等闭源商业模型的输出作为训练数据",
+CONFLICTING_POLICY_PATTERNS = [
+    re.compile(r"可以使用\s*(?:GPT|Claude|Gemini|闭源商业模型)[^。\n]*(?:训练数据|训练集)"),
+    re.compile(r"(?:GPT|Claude|Gemini)[^。\n]*(?:输出|生成内容)[^。\n]*(?:可用于|可以用于|作为)[^。\n]*(?:训练数据|训练集)"),
 ]
+NEGATED_POLICY_MARKERS = ("不要使用", "不得使用", "禁止使用", "不应使用", "不能使用")
+
+
+def has_conflicting_policy(text: str) -> str | None:
+    """返回文档中的冲突数据来源说明；合规的否定表述不算冲突。"""
+    for pattern in CONFLICTING_POLICY_PATTERNS:
+        for match in pattern.finditer(text):
+            sentence_start = max(text.rfind("。", 0, match.start()), text.rfind("\n", 0, match.start())) + 1
+            sentence = text[sentence_start : match.end()]
+            if any(marker in sentence for marker in NEGATED_POLICY_MARKERS):
+                continue
+            return match.group(0)
+    return None
 
 
 def collect_errors(project_root: Path) -> list[str]:
@@ -119,9 +134,9 @@ def collect_errors(project_root: Path) -> list[str]:
         if not doc_path.exists():
             continue
         text = doc_path.read_text(encoding="utf-8")
-        for phrase in FORBIDDEN_POLICY_PHRASES:
-            if phrase in text:
-                errors.append(f"文档 {doc_path.relative_to(project_root)} 包含冲突的数据来源说明：{phrase}")
+        conflicting_policy = has_conflicting_policy(text)
+        if conflicting_policy:
+            errors.append(f"文档 {doc_path.relative_to(project_root)} 包含冲突的数据来源说明：{conflicting_policy}")
 
     return errors
 
