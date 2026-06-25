@@ -32,7 +32,7 @@
       "stage": "P1",
       "status": "in_progress",
       "baseline": "Claude Code / Codex / Trae / Cursor",
-      "next_step": "已增加上下文索引、Python 代码符号索引和补丁计划生成器；下一步增加测试运行工作流"
+      "next_step": "已增加上下文索引、Python 代码符号索引、补丁计划生成器和测试运行器；下一步增加 diff/patch 生成工作流"
     },
     {
       "id": "tool_calling",
