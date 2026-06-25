@@ -1,0 +1,44 @@
+{
+  "skill_name": "local_code_agent_foundation",
+  "version": "0.1.0",
+  "description": "Safe local coding-agent workflow built on context indexing, symbol indexing, patch planning, model patch specs, diff generation, safe apply and test reports.",
+  "entrypoint": "scripts/ai_code_agent.py",
+  "tool_registry": "configs/tool_registry.json",
+  "safe_defaults": {
+    "model_call": false,
+    "apply_changes": false,
+    "execute_tests": false
+  },
+  "primary_commands": [
+    {
+      "name": "plan",
+      "script": "scripts/ai_code_agent.py",
+      "description": "Create planning artifacts without model calls or file writes."
+    },
+    {
+      "name": "generate_patch_spec",
+      "script": "scripts/call_model_for_patch_spec.py",
+      "description": "Call a configured model API to produce patch_spec_v1 JSON."
+    },
+    {
+      "name": "validate_patch_spec",
+      "script": "scripts/validate_patch_spec.py",
+      "description": "Validate patch_spec_v1 before diff generation or apply."
+    },
+    {
+      "name": "review_diff",
+      "script": "scripts/create_unified_diff.py",
+      "description": "Generate a reviewable unified diff without editing source files."
+    },
+    {
+      "name": "apply_after_review",
+      "script": "scripts/apply_patch_spec.py",
+      "description": "Apply patch spec only through dry-run or explicit confirmation."
+    },
+    {
+      "name": "test_after_apply",
+      "script": "scripts/run_test_plan.py",
+      "description": "Run or dry-run allowed tests from a patch plan."
+    }
+  ]
+}
