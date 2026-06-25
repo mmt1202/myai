@@ -1,0 +1,94 @@
+{
+  "foundation_positioning": "local universal AI foundation",
+  "principle": "short drama and comic generation are downstream product capabilities, not the boundary of the base model foundation",
+  "capabilities": [
+    {
+      "id": "text_chat",
+      "name": "通用对话与文本生成",
+      "stage": "P0",
+      "status": "implemented",
+      "baseline": "Qwen Text/Instruct runtime",
+      "next_step": "继续完善训练、评测、版本管理和 API active version 启动"
+    },
+    {
+      "id": "long_context",
+      "name": "长上下文与项目级上下文管理",
+      "stage": "P1",
+      "status": "planned",
+      "baseline": "ChatGPT / Claude long context workflow",
+      "next_step": "增加上下文切片、摘要、文件索引和检索策略"
+    },
+    {
+      "id": "reasoning",
+      "name": "复杂推理与任务分解",
+      "stage": "P1",
+      "status": "planned",
+      "baseline": "DeepSeek / OpenAI reasoning style workflow",
+      "next_step": "增加推理评测集、任务分解模板和多轮自检"
+    },
+    {
+      "id": "coding_agent",
+      "name": "代码理解、生成、修改和项目执行",
+      "stage": "P1",
+      "status": "planned",
+      "baseline": "Claude Code / Codex / Trae / Cursor",
+      "next_step": "增加代码仓库读取、补丁生成、测试运行和 CLI 工作流"
+    },
+    {
+      "id": "tool_calling",
+      "name": "工具调用和函数调用",
+      "stage": "P1",
+      "status": "planned",
+      "baseline": "OpenAI tools / Claude tools / Qwen-Agent",
+      "next_step": "定义工具 schema、调用协议和安全边界"
+    },
+    {
+      "id": "skills_plugins_mcp",
+      "name": "Skill、插件和 MCP 扩展系统",
+      "stage": "P2",
+      "status": "planned",
+      "baseline": "Claude skills / MCP / IDE plugins",
+      "next_step": "设计 skill manifest、插件生命周期和 MCP server 接入约定"
+    },
+    {
+      "id": "rag_memory",
+      "name": "RAG、知识库和长期记忆",
+      "stage": "P2",
+      "status": "planned",
+      "baseline": "enterprise AI assistant knowledge workflow",
+      "next_step": "增加文档索引、向量库适配、权限和引用追踪"
+    },
+    {
+      "id": "vision",
+      "name": "视觉理解",
+      "stage": "P2",
+      "status": "planned",
+      "baseline": "Qwen-VL / GPT-4o style vision understanding",
+      "next_step": "接入图片输入、视觉 processor、图像评测和角色一致性能力"
+    },
+    {
+      "id": "speech",
+      "name": "语音识别与语音合成",
+      "stage": "P2",
+      "status": "planned",
+      "baseline": "Qwen-ASR / Qwen-TTS",
+      "next_step": "接入音频输入输出、字幕转写和配音生成"
+    },
+    {
+      "id": "omni_modal",
+      "name": "图文音视频统一多模态",
+      "stage": "P3",
+      "status": "planned",
+      "baseline": "Qwen-Omni / GPT-4o style multimodal workflow",
+      "next_step": "统一多模态消息格式和运行时路由"
+    },
+    {
+      "id": "drama_factory",
+      "name": "AI 短剧/漫剧工厂",
+      "stage": "Product",
+      "status": "planned",
+      "baseline": "MagicLight / 漫剧助手类产品方向",
+      "next_step": "等基座稳定后另开产品线设计"
+    }
+  ]
+}
