@@ -1,0 +1,11 @@
+{
+  "task": "example patch spec for documentation only",
+  "changes": [
+    {
+      "path": "docs/p1_patch_planning.md",
+      "find": "Patch planning is a coding-agent foundation feature.",
+      "replace": "Patch planning is a coding-agent foundation feature that creates a safe plan before editing files.",
+      "count": 1
+    }
+  ]
+}
