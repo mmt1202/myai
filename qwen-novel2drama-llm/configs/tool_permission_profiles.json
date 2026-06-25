@@ -1,0 +1,41 @@
+{
+  "profiles": [
+    {
+      "id": "readonly",
+      "description": "Only read-only discovery and context inspection tools.",
+      "allow_write_tools": false,
+      "allow_model_calls": false,
+      "allow_apply": false,
+      "allow_execute_tests": false,
+      "allowed_categories": ["context", "code_intelligence", "safety"]
+    },
+    {
+      "id": "planning",
+      "description": "Allows planning artifacts, indexes and dry-run validation reports, but no model calls, source edits or real test execution.",
+      "allow_write_tools": true,
+      "allow_model_calls": false,
+      "allow_apply": false,
+      "allow_execute_tests": false,
+      "allowed_categories": ["context", "code_intelligence", "planning", "safety", "validation", "workflow"]
+    },
+    {
+      "id": "model_patch",
+      "description": "Allows model calls and patch spec generation, but no source edits or real test execution.",
+      "allow_write_tools": true,
+      "allow_model_calls": true,
+      "allow_apply": false,
+      "allow_execute_tests": false,
+      "allowed_categories": ["context", "code_intelligence", "planning", "model_bridge", "safety", "patching", "validation", "workflow"]
+    },
+    {
+      "id": "trusted_apply",
+      "description": "Allows confirmed safe patch application and dry-run or explicit test execution.",
+      "allow_write_tools": true,
+      "allow_model_calls": true,
+      "allow_apply": true,
+      "allow_execute_tests": true,
+      "allowed_categories": ["context", "code_intelligence", "planning", "model_bridge", "safety", "patching", "validation", "workflow"]
+    }
+  ],
+  "default_profile": "planning"
+}
