@@ -1,0 +1,60 @@
+{
+  "server_name": "local-code-agent-mcp",
+  "version": "0.1.0",
+  "status": "planned_manifest_only",
+  "description": "Planned MCP surface for the local coding-agent foundation. This manifest describes tools but does not implement an MCP server yet.",
+  "tool_registry": "configs/tool_registry.json",
+  "tools": [
+    {
+      "name": "context.build_index",
+      "registry_tool_id": "build_context_index"
+    },
+    {
+      "name": "context.search",
+      "registry_tool_id": "search_context_index"
+    },
+    {
+      "name": "context.read_chunk",
+      "registry_tool_id": "read_context_chunk"
+    },
+    {
+      "name": "symbols.build_index",
+      "registry_tool_id": "build_code_symbols"
+    },
+    {
+      "name": "symbols.search",
+      "registry_tool_id": "search_code_symbols"
+    },
+    {
+      "name": "patch.plan",
+      "registry_tool_id": "create_patch_plan"
+    },
+    {
+      "name": "patch.validate_spec",
+      "registry_tool_id": "validate_patch_spec"
+    },
+    {
+      "name": "patch.create_diff",
+      "registry_tool_id": "create_unified_diff"
+    },
+    {
+      "name": "patch.apply_safe",
+      "registry_tool_id": "apply_patch_spec"
+    },
+    {
+      "name": "tests.run_plan",
+      "registry_tool_id": "run_test_plan"
+    },
+    {
+      "name": "agent.run",
+      "registry_tool_id": "ai_code_agent"
+    }
+  ],
+  "security_policy": {
+    "default_write_mode": "dry_run",
+    "requires_explicit_apply_confirmation": true,
+    "allowed_test_commands_only": true,
+    "project_root_only": true,
+    "no_model_weight_edits": true
+  }
+}
