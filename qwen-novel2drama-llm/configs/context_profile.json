@@ -1,0 +1,8 @@
+{
+  "profile": "default_code_workspace",
+  "include_globs": ["README.md", "docs/**/*.md", "configs/**/*.json", "configs/**/*.yaml", "scripts/**/*.py", "inference/**/*.py", "eval/**/*.py", "tests/**/*.py", "prompts/**/*.txt"],
+  "exclude_dirs": [".git", ".venv", "__pycache__", ".cache", "models", "saves", "outputs", "logs", "raw_novels"],
+  "exclude_suffixes": [".bin", ".safetensors", ".gguf", ".pt", ".pth", ".pyc"],
+  "max_file_bytes": 200000,
+  "chunk_chars": 4000
+}
