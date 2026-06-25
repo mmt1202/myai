@@ -1,4 +1,67 @@
 {
   "default_runtime": "qwen-text-p0",
-  "runtimes": []
+  "runtimes": [
+    {
+      "name": "qwen-text-p0",
+      "family": "Qwen Text/Instruct",
+      "capability": "text_generation",
+      "stage": "P0",
+      "status": "implemented",
+      "model_path": "Qwen/Qwen2.5-1.5B-Instruct",
+      "adapter_path": null,
+      "system_prompt_file": "prompts/system_prompt.txt",
+      "description": "小说理解、短剧大纲、角色设定、分镜、视频提示词等文本生成运行时。"
+    },
+    {
+      "name": "qwen3-text-p1",
+      "family": "Qwen3 Text",
+      "capability": "text_generation",
+      "stage": "P1",
+      "status": "planned",
+      "model_path": "Qwen/Qwen3-4B-Instruct",
+      "adapter_path": null,
+      "system_prompt_file": "prompts/system_prompt.txt",
+      "description": "复杂剧情推理、多轮创作和工具调用方向；待补训练配置和评测。"
+    },
+    {
+      "name": "qwen-vl-p2",
+      "family": "Qwen-VL / Qwen3-VL",
+      "capability": "vision_understanding",
+      "stage": "P2",
+      "status": "planned",
+      "description": "参考图理解、角色一致性检查、分镜图审核；待实现图像输入、processor 和评测。"
+    },
+    {
+      "name": "qwen-tts-p2",
+      "family": "Qwen-TTS",
+      "capability": "speech_synthesis",
+      "stage": "P2",
+      "status": "planned",
+      "description": "角色配音、旁白和声音风格生成；待实现音频输出与流式生成。"
+    },
+    {
+      "name": "qwen-asr-p2",
+      "family": "Qwen-ASR",
+      "capability": "speech_recognition",
+      "stage": "P2",
+      "status": "planned",
+      "description": "语音输入、字幕转写和素材检索；待实现音频输入和转写接口。"
+    },
+    {
+      "name": "qwen-omni-p3",
+      "family": "Qwen-Omni",
+      "capability": "omni_modal",
+      "stage": "P3",
+      "status": "planned",
+      "description": "图文音视频统一理解与生产研究；待实现多模态消息格式和模型路由。"
+    },
+    {
+      "name": "qwen-agent-p3",
+      "family": "Qwen-Agent",
+      "capability": "agent_workflow",
+      "stage": "P3",
+      "status": "planned",
+      "description": "小说到剧本、分镜、视频提示词和配音稿的自动化生产 Agent；待接工具编排。"
+    }
+  ]
 }
