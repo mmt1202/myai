@@ -32,23 +32,23 @@
       "stage": "P1",
       "status": "in_progress",
       "baseline": "Claude Code / Codex / Trae / Cursor",
-      "next_step": "已增加上下文索引、代码符号索引、补丁计划、测试运行器、diff 生成器、安全 patch 应用器、端到端 agent workflow、模型 patch spec 接入层、真实模型 API 调用适配器和完整代码 Agent CLI；下一步工具 schema 化并接入 MCP/Skill"
+      "next_step": "已增加完整代码 Agent CLI 和工具注册层；下一步实现本地 MCP server wrapper"
     },
     {
       "id": "tool_calling",
       "name": "工具调用和函数调用",
       "stage": "P1",
-      "status": "planned",
+      "status": "in_progress",
       "baseline": "OpenAI tools / Claude tools / Qwen-Agent",
-      "next_step": "定义工具 schema、调用协议和安全边界"
+      "next_step": "已增加工具注册表、inspect/validate 脚本和安全元数据；下一步增加工具调用日志和权限 profile"
     },
     {
       "id": "skills_plugins_mcp",
       "name": "Skill、插件和 MCP 扩展系统",
       "stage": "P2",
-      "status": "planned",
+      "status": "in_progress",
       "baseline": "Claude skills / MCP / IDE plugins",
-      "next_step": "设计 skill manifest、插件生命周期和 MCP server 接入约定"
+      "next_step": "已增加 code-agent Skill manifest 和 MCP manifest 草案；下一步实现最小 MCP server wrapper"
     },
     {
       "id": "rag_memory",
