@@ -2,7 +2,7 @@
 
 P1 starts moving the project from a single text runtime toward a coding-agent capable foundation.
 
-The first step is project-level context indexing, search and chunk reading.
+The first step is project-level context indexing, search, chunk reading and code-symbol indexing.
 
 ## Goal
 
@@ -12,6 +12,7 @@ Build a lightweight index of project files so later agents can:
 - find relevant files
 - track file hashes
 - split long files into context chunks
+- locate Python classes and functions
 - support future RAG, code editing, patch planning and CLI workflows
 
 ## Profile
@@ -66,9 +67,31 @@ python scripts/read_context_chunk.py --path inference/api_server.py --chunk 1 --
 
 The chunk reader prevents reading files outside the project root and returns a JSON payload with chunk metadata and text.
 
+## Build code symbols
+
+```bash
+python scripts/build_code_symbols.py
+```
+
+Custom output:
+
+```bash
+python scripts/build_code_symbols.py --output outputs/code_symbols.json
+```
+
+The code-symbol index records Python classes, functions, async functions and imports.
+
+## Search code symbols
+
+```bash
+python scripts/search_code_symbols.py --query build
+python scripts/search_code_symbols.py --query Runtime --type class
+python scripts/search_code_symbols.py --query resolve --type function
+```
+
 ## Next steps
 
-- Add code-symbol indexing.
 - Add summary compression for large contexts.
+- Add symbol-to-chunk mapping.
 - Add vector/RAG backend later.
 - Add CLI commands for coding-agent workflows.
