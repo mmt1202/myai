@@ -1,6 +1,6 @@
 {
   "foundation_positioning": "local universal AI foundation",
-  "principle": "short drama and comic generation are downstream product capabilities, not the boundary of the base model foundation",
+  "principle": "short drama and comic generation are the primary product line after the foundation becomes usable, but they are built on the universal foundation rather than limiting it.",
   "capabilities": [
     {
       "id": "text_chat",
@@ -85,10 +85,10 @@
     {
       "id": "drama_factory",
       "name": "AI 短剧/漫剧工厂",
-      "stage": "Product",
+      "stage": "PrimaryProduct",
       "status": "planned",
-      "baseline": "MagicLight / 漫剧助手类产品方向",
-      "next_step": "等基座稳定后另开产品线设计"
+      "baseline": "MagicLight / 漫剧助手 / 即梦AI 类产品方向",
+      "next_step": "基座完成 P1/P2 后启动 AI 短剧/漫剧专项增强：故事推理、角色一致性、分镜、提示词、多模型生产路由和发布物料"
     }
   ]
 }
