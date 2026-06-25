@@ -32,7 +32,7 @@
       "stage": "P1",
       "status": "in_progress",
       "baseline": "Claude Code / Codex / Trae / Cursor",
-      "next_step": "已增加上下文索引、代码符号索引、补丁计划、测试运行器、diff 生成器、安全 patch 应用器和端到端 agent workflow；下一步接入模型生成 patch spec"
+      "next_step": "已增加上下文索引、代码符号索引、补丁计划、测试运行器、diff 生成器、安全 patch 应用器、端到端 agent workflow 和模型 patch spec 接入层；下一步接入真实模型 API 调用适配器"
     },
     {
       "id": "tool_calling",
