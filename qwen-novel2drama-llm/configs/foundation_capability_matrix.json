@@ -14,9 +14,9 @@
       "id": "long_context",
       "name": "长上下文与项目级上下文管理",
       "stage": "P1",
-      "status": "planned",
+      "status": "in_progress",
       "baseline": "ChatGPT / Claude long context workflow",
-      "next_step": "增加上下文切片、摘要、文件索引和检索策略"
+      "next_step": "已增加项目上下文索引；下一步增加索引搜索、文件分块读取和摘要压缩"
     },
     {
       "id": "reasoning",
