@@ -16,7 +16,7 @@
       "stage": "P1",
       "status": "in_progress",
       "baseline": "ChatGPT / Claude long context workflow",
-      "next_step": "已增加项目上下文索引；下一步增加索引搜索、文件分块读取和摘要压缩"
+      "next_step": "已增加项目上下文索引、索引搜索和文件分块读取；下一步增加摘要压缩"
     },
     {
       "id": "reasoning",
@@ -30,9 +30,9 @@
       "id": "coding_agent",
       "name": "代码理解、生成、修改和项目执行",
       "stage": "P1",
-      "status": "planned",
+      "status": "in_progress",
       "baseline": "Claude Code / Codex / Trae / Cursor",
-      "next_step": "增加代码仓库读取、补丁生成、测试运行和 CLI 工作流"
+      "next_step": "已增加上下文索引和 Python 代码符号索引；下一步增加补丁计划和测试运行工作流"
     },
     {
       "id": "tool_calling",
