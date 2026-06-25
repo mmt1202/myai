@@ -1,9 +1,11 @@
 {
   "server_name": "local-code-agent-mcp",
   "version": "0.1.0",
-  "status": "planned_manifest_only",
-  "description": "Planned MCP surface for the local coding-agent foundation. This manifest describes tools but does not implement an MCP server yet.",
+  "status": "local_wrapper_implemented",
+  "description": "Local MCP-style JSON-RPC tool server wrapper for the coding-agent foundation.",
+  "entrypoint": "scripts/mcp_tool_server.py",
   "tool_registry": "configs/tool_registry.json",
+  "permission_profiles": "configs/tool_permission_profiles.json",
   "tools": [
     {
       "name": "context.build_index",
@@ -50,11 +52,22 @@
       "registry_tool_id": "ai_code_agent"
     }
   ],
+  "supported_methods": [
+    "initialize",
+    "ping",
+    "tools/list",
+    "tools/call",
+    "registry/list",
+    "permissions/list",
+    "server/info"
+  ],
   "security_policy": {
     "default_write_mode": "dry_run",
     "requires_explicit_apply_confirmation": true,
     "allowed_test_commands_only": true,
     "project_root_only": true,
-    "no_model_weight_edits": true
+    "no_model_weight_edits": true,
+    "profile_based_permissions": true,
+    "audit_log": "outputs/tool_logs/mcp_tool_server.jsonl"
   }
 }
