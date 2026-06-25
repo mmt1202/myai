@@ -1,0 +1,28 @@
+{
+  "schema_name": "patch_spec_v1",
+  "required_top_level": ["task", "changes"],
+  "change_operations": ["replace", "append"],
+  "replace_change_required": ["path", "find", "replace"],
+  "append_change_required": ["path", "append"],
+  "optional_fields": ["count", "reason"],
+  "safety_rules": [
+    "Only output JSON.",
+    "Do not include markdown fences.",
+    "Only edit files listed in the patch plan target_files.",
+    "Use exact find text copied from provided chunks.",
+    "Use count when replacing text.",
+    "Prefer small focused changes."
+  ],
+  "example": {
+    "task": "update health response",
+    "changes": [
+      {
+        "path": "inference/api_server.py",
+        "find": "return {\"status\": \"ok\"}",
+        "replace": "return {\"status\": \"ok\", \"model_version\": ACTIVE_MODEL_VERSION}",
+        "count": 1,
+        "reason": "Expose active model version in health response."
+      }
+    ]
+  }
+}
