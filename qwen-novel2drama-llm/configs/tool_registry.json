@@ -1,0 +1,168 @@
+{
+  "registry_name": "foundation_tool_registry_v1",
+  "purpose": "Expose coding-agent foundation scripts as structured tools for future Skill, plugin and MCP integration.",
+  "default_safety": {
+    "write_files": false,
+    "execute_tests": false,
+    "requires_confirmation_for_write": true,
+    "project_root_only": true
+  },
+  "tools": [
+    {
+      "id": "build_context_index",
+      "name": "Build context index",
+      "script": "scripts/build_context_index.py",
+      "category": "context",
+      "write_files": true,
+      "safe_by_default": true,
+      "inputs": ["project_root", "profile", "output"],
+      "outputs": ["context_index.json"],
+      "description": "Builds a project file index with hashes, sizes, line counts and chunk metadata."
+    },
+    {
+      "id": "search_context_index",
+      "name": "Search context index",
+      "script": "scripts/search_context_index.py",
+      "category": "context",
+      "write_files": false,
+      "safe_by_default": true,
+      "inputs": ["index", "query", "limit"],
+      "outputs": ["matching files and lines"],
+      "description": "Searches indexed files by keyword."
+    },
+    {
+      "id": "read_context_chunk",
+      "name": "Read context chunk",
+      "script": "scripts/read_context_chunk.py",
+      "category": "context",
+      "write_files": false,
+      "safe_by_default": true,
+      "inputs": ["project_root", "path", "chunk", "chunk_chars"],
+      "outputs": ["chunk metadata and text"],
+      "description": "Reads a bounded file chunk while blocking paths outside the project root."
+    },
+    {
+      "id": "build_code_symbols",
+      "name": "Build code symbol index",
+      "script": "scripts/build_code_symbols.py",
+      "category": "code_intelligence",
+      "write_files": true,
+      "safe_by_default": true,
+      "inputs": ["project_root", "context_index", "output"],
+      "outputs": ["code_symbols.json"],
+      "description": "Parses Python files and records classes, functions, async functions and imports."
+    },
+    {
+      "id": "search_code_symbols",
+      "name": "Search code symbols",
+      "script": "scripts/search_code_symbols.py",
+      "category": "code_intelligence",
+      "write_files": false,
+      "safe_by_default": true,
+      "inputs": ["index", "query", "type", "limit"],
+      "outputs": ["matching symbols"],
+      "description": "Searches the code symbol index by class or function name."
+    },
+    {
+      "id": "create_patch_plan",
+      "name": "Create patch plan",
+      "script": "scripts/create_patch_plan.py",
+      "category": "planning",
+      "write_files": true,
+      "safe_by_default": true,
+      "inputs": ["task", "context_index", "symbols", "output"],
+      "outputs": ["patch_plan.json"],
+      "description": "Creates a structured patch plan before editing files."
+    },
+    {
+      "id": "build_patch_spec_prompt",
+      "name": "Build patch spec prompt",
+      "script": "scripts/build_patch_spec_prompt.py",
+      "category": "model_bridge",
+      "write_files": true,
+      "safe_by_default": true,
+      "inputs": ["workflow", "patch_plan", "schema", "output"],
+      "outputs": ["patch_spec_prompt.json"],
+      "description": "Builds a constrained model input payload for patch_spec_v1 generation."
+    },
+    {
+      "id": "call_model_for_patch_spec",
+      "name": "Call model for patch spec",
+      "script": "scripts/call_model_for_patch_spec.py",
+      "category": "model_bridge",
+      "write_files": true,
+      "safe_by_default": false,
+      "inputs": ["prompt", "mode", "url", "model", "output"],
+      "outputs": ["patch_spec.json"],
+      "description": "Calls an OpenAI-compatible or local generate API and saves model-generated patch_spec JSON."
+    },
+    {
+      "id": "validate_patch_spec",
+      "name": "Validate patch spec",
+      "script": "scripts/validate_patch_spec.py",
+      "category": "safety",
+      "write_files": false,
+      "safe_by_default": true,
+      "inputs": ["spec", "patch_plan"],
+      "outputs": ["validation report"],
+      "description": "Validates model-generated patch specs before diff generation or apply."
+    },
+    {
+      "id": "create_unified_diff",
+      "name": "Create unified diff",
+      "script": "scripts/create_unified_diff.py",
+      "category": "patching",
+      "write_files": true,
+      "safe_by_default": true,
+      "inputs": ["spec", "output", "report"],
+      "outputs": ["generated.diff", "diff report"],
+      "description": "Generates a reviewable unified diff from a structured patch spec without editing source files."
+    },
+    {
+      "id": "apply_patch_spec",
+      "name": "Apply patch spec safely",
+      "script": "scripts/apply_patch_spec.py",
+      "category": "patching",
+      "write_files": true,
+      "safe_by_default": true,
+      "requires_confirmation": true,
+      "inputs": ["spec", "dry_run", "confirm", "report"],
+      "outputs": ["patch apply report"],
+      "description": "Applies exact find/replace or append operations. Defaults to dry-run and requires confirmation to write files."
+    },
+    {
+      "id": "run_test_plan",
+      "name": "Run test plan",
+      "script": "scripts/run_test_plan.py",
+      "category": "validation",
+      "write_files": true,
+      "safe_by_default": true,
+      "inputs": ["plan", "dry_run", "timeout", "output"],
+      "outputs": ["test run report"],
+      "description": "Runs or dry-runs allowed test commands from a patch plan and writes a JSON report."
+    },
+    {
+      "id": "run_agent_workflow",
+      "name": "Run agent workflow",
+      "script": "scripts/run_agent_workflow.py",
+      "category": "workflow",
+      "write_files": true,
+      "safe_by_default": true,
+      "inputs": ["task", "output_dir", "execute_tests"],
+      "outputs": ["workflow artifacts"],
+      "description": "Creates context, symbol, patch plan and test-plan artifacts for a coding task."
+    },
+    {
+      "id": "ai_code_agent",
+      "name": "AI code agent CLI",
+      "script": "scripts/ai_code_agent.py",
+      "category": "workflow",
+      "write_files": true,
+      "safe_by_default": true,
+      "requires_confirmation": true,
+      "inputs": ["task", "model_url", "patch_spec", "apply", "execute_tests"],
+      "outputs": ["AI code agent run artifacts"],
+      "description": "Full safe coding-agent workflow wrapper. Does not call models, apply changes or execute tests unless explicitly requested."
+    }
+  ]
+}
