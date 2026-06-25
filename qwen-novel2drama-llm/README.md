@@ -131,8 +131,15 @@ python scripts/prepare_data.py --input-dir raw_novels --output datasets/raw_exam
 
 生成的 `output` 为空，需要人工补写高质量答案后再训练。
 
+## 多轮数据预留
 
+第一版以单轮 SFT 为主，但已经预留 messages 格式样例和转换脚本：
 
+```bash
+python scripts/convert_to_messages.py --input datasets/train.jsonl --output outputs/train_messages.jsonl --system-prompt-file prompts/system_prompt.txt
+```
+
+多轮数据建设说明见 `docs/multiturn_data.md`。
 
 ## 数据集建设计划
 
@@ -151,7 +158,7 @@ python scripts/plan_dataset_mix.py --total 1000 --output outputs/dataset_plan_10
 
 ```bash
 python scripts/analyze_dataset.py --file datasets/train.jsonl --output outputs/train_report.json
-python scripts/dedupe_dataset.py --input datasets/train.jsonl --output outputs/train.dedup.jsonl --mode instruction_input
+python scripts/dedupe_dataset.py --input datasets/train.jsonl --output datasets/train.dedup.jsonl --mode instruction_input
 python scripts/sample_dataset.py --input datasets/train.jsonl --output outputs/sample_review.jsonl --size 20 --seed 42
 ```
 
