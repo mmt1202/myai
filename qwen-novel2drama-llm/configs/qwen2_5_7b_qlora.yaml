@@ -1,0 +1,36 @@
+# Qwen2.5-7B QLoRA：适合 16GB-24GB 显存尝试
+model_name_or_path: Qwen/Qwen2.5-7B-Instruct
+stage: sft
+do_train: true
+do_eval: true
+finetuning_type: lora
+lora_target: all
+template: qwen
+dataset: novel2drama
+# 显式指定验证集，避免训练集和验证集混用
+eval_dataset: novel2drama_val
+dataset_dir: datasets
+cutoff_len: 2048
+max_samples: 30000
+overwrite_cache: true
+preprocessing_num_workers: 4
+output_dir: saves/qwen2_5_7b_qlora
+overwrite_output_dir: true
+per_device_train_batch_size: 1
+per_device_eval_batch_size: 1
+gradient_accumulation_steps: 16
+learning_rate: 0.0001
+num_train_epochs: 3
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+logging_steps: 10
+save_steps: 100
+save_total_limit: 3
+eval_steps: 100
+plot_loss: true
+fp16: true
+# QLoRA 关键参数：4bit 量化加载底座模型，显著降低显存占用
+quantization_bit: 4
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.05

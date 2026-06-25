@@ -1,0 +1,1 @@
+{"instruction":"请把下面需求转换成 JSON 格式任务描述","input":"做一个插件，可以读取当前文件夹下的图片并生成缩略图。","output":"{\n  \"task_name\": \"image_thumbnail_plugin\",\n  \"goal\": \"读取当前文件夹下的图片并生成缩略图\",\n  \"inputs\": [\"folder_path\"],\n  \"outputs\": [\"thumbnail_files\"],\n  \"steps\": [\"扫描图片文件\", \"创建输出目录\", \"生成缩略图\", \"返回处理结果\"]\n}"}

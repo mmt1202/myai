@@ -1,0 +1,147 @@
+"""项目级静态检查：文件结构、数据集配置和模型大文件防误提交。"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+REQUIRED_FILES = [
+    "README.md",
+    ".github/workflows/checks.yml",
+    "docs/annotation_guide.md",
+    "docs/data_collection.md",
+    "docs/foundation_model_strategy.md",
+    "deploy/README.md",
+    "deploy/gguf_export.md",
+    "deploy/ollama_export.md",
+    "deploy/vllm_server.md",
+    "docs/data_format.md",
+    "docs/dataset_plan.md",
+    "docs/llamafactory_setup.md",
+    "requirements.txt",
+    "requirements-api.txt",
+    "requirements-dev.txt",
+    "requirements-train.txt",
+    "requirements-windows.txt",
+    ".gitignore",
+    "Dockerfile",
+    "datasets/train.jsonl",
+    "datasets/val.jsonl",
+    "datasets/raw_examples.jsonl",
+    "datasets/base_train.jsonl",
+    "datasets/base_val.jsonl",
+    "datasets/base_task_mix.json",
+    "datasets/dataset_info.json",
+    "datasets/sources.example.jsonl",
+    "datasets/task_mix.json",
+    "datasets/model_family_matrix.json",
+    "datasets/multiturn_examples.jsonl",
+    "configs/qwen2_5_1_5b_lora.yaml",
+    "configs/qwen2_5_3b_foundation_lora.yaml",
+    "configs/qwen2_5_7b_foundation_qlora.yaml",
+    "configs/qwen2_5_3b_lora.yaml",
+    "configs/qwen2_5_7b_qlora.yaml",
+    "scripts/validate_dataset.py",
+    "scripts/split_dataset.py",
+    "scripts/prepare_data.py",
+    "scripts/analyze_dataset.py",
+    "scripts/collect_web_text.py",
+    "scripts/corpus_to_sft_template.py",
+    "scripts/convert_to_messages.py",
+    "scripts/dedupe_dataset.py",
+    "scripts/check_environment.py",
+    "scripts/run_checks.py",
+    "scripts/sample_dataset.py",
+    "scripts/train_lora.ps1",
+    "scripts/train_lora.sh",
+    "scripts/plan_dataset_mix.py",
+    "scripts/plan_qwen_ecosystem.py",
+    "scripts/merge_lora.ps1",
+    "scripts/merge_lora.sh",
+    "inference/model_utils.py",
+    "inference/chat.py",
+    "inference/api_server.py",
+    "inference/test_prompt.py",
+    "inference/client_test.py",
+    "eval/eval_prompts.jsonl",
+    "eval/compare_results.py",
+    "eval/manual_eval_template.csv",
+    "eval/run_eval.py",
+    "eval/scoring_guide.md",
+    "prompts/base_system_prompt.txt",
+    "prompts/coding_assistant_prompt.txt",
+    "prompts/agent_tool_prompt.txt",
+    "tests/test_dataset_tools.py",
+]
+
+FORBIDDEN_SUFFIXES = {".bin", ".safetensors", ".gguf", ".pt", ".pth"}
+REQUIRED_DATASETS = {"novel2drama": "train.jsonl", "novel2drama_val": "val.jsonl", "foundation_base": "base_train.jsonl", "foundation_base_val": "base_val.jsonl"}
+
+
+def collect_errors(project_root: Path) -> list[str]:
+    """收集项目静态检查错误。"""
+    errors: list[str] = []
+    for relative_path in REQUIRED_FILES:
+        if not (project_root / relative_path).exists():
+            errors.append(f"缺少必要文件：{relative_path}")
+
+    dataset_info_path = project_root / "datasets" / "dataset_info.json"
+    if dataset_info_path.exists():
+        try:
+            dataset_info = json.loads(dataset_info_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            errors.append(f"dataset_info.json 不是合法 JSON：{exc}")
+        else:
+            for dataset_name, file_name in REQUIRED_DATASETS.items():
+                item = dataset_info.get(dataset_name)
+                if not isinstance(item, dict):
+                    errors.append(f"dataset_info.json 缺少数据集：{dataset_name}")
+                    continue
+                if item.get("file_name") != file_name:
+                    errors.append(f"数据集 {dataset_name} 的 file_name 应为 {file_name}")
+                columns = item.get("columns", {})
+                expected_columns = {"prompt": "instruction", "query": "input", "response": "output"}
+                if columns != expected_columns:
+                    errors.append(f"数据集 {dataset_name} 字段映射不正确：{columns}")
+
+    for path in project_root.rglob("*"):
+        if path.is_file() and path.suffix.lower() in FORBIDDEN_SUFFIXES:
+            errors.append(f"发现不应提交的模型/权重文件：{path.relative_to(project_root)}")
+
+    for config_path in (project_root / "configs").glob("*.yaml"):
+        text = config_path.read_text(encoding="utf-8")
+        for required in ("stage: sft", "finetuning_type: lora", "template: qwen"):
+            if required not in text:
+                errors.append(f"配置 {config_path.name} 缺少：{required}")
+        if "foundation" in config_path.name:
+            if "dataset: foundation_base" not in text:
+                errors.append(f"配置 {config_path.name} 缺少：dataset: foundation_base")
+            if "eval_dataset: foundation_base_val" not in text:
+                errors.append(f"配置 {config_path.name} 未显式指定 eval_dataset: foundation_base_val")
+        else:
+            if "dataset: novel2drama" not in text:
+                errors.append(f"配置 {config_path.name} 缺少：dataset: novel2drama")
+            if "eval_dataset: novel2drama_val" not in text:
+                errors.append(f"配置 {config_path.name} 未显式指定 eval_dataset: novel2drama_val")
+
+    return errors
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="检查 qwen-novel2drama-llm 项目结构和关键配置。")
+    parser.add_argument("--project-root", default=".", help="项目根目录，默认当前目录。")
+    args = parser.parse_args()
+    project_root = Path(args.project_root).resolve()
+    errors = collect_errors(project_root)
+    if errors:
+        print("项目检查失败：", file=sys.stderr)
+        for error in errors:
+            print(f"- {error}", file=sys.stderr)
+        return 1
+    print("项目检查通过")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

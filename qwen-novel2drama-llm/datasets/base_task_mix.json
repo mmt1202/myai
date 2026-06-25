@@ -1,0 +1,11 @@
+{
+  "description": "通用本地大模型基座数据配比建议，AI短剧/漫剧只是其中一个垂直模块。",
+  "tasks": [
+    {"task_type": "general_assistant", "name": "通用助手：问答、总结、规划、结构化输出", "ratio": 0.25},
+    {"task_type": "coding_assistant", "name": "编程助手：解释、生成、重构、测试建议", "ratio": 0.20},
+    {"task_type": "agent_tool_planning", "name": "Agent/工具调用：任务拆解、工具选择、MCP/插件规划", "ratio": 0.20},
+    {"task_type": "content_creation", "name": "内容生产：文案、脚本、提示词、运营素材", "ratio": 0.15},
+    {"task_type": "drama_comic_vertical", "name": "AI短剧/AI漫剧：小说改编、分镜、角色、视频提示词", "ratio": 0.15},
+    {"task_type": "safety_and_format", "name": "安全合规与稳定格式：边界、拒答、JSON/Markdown输出", "ratio": 0.05}
+  ]
+}
