@@ -1,0 +1,13 @@
+{
+  "product_positioning": "AI短剧全链路模型工厂",
+  "families": [
+    {"family": "Qwen Text/Instruct", "stage": "P0", "role": "小说理解、大纲、分集剧情、角色设定、分镜、视频提示词"},
+    {"family": "Qwen3 Text", "stage": "P1", "role": "复杂剧情推理、多轮创作、工具调用"},
+    {"family": "Qwen-VL / Qwen3-VL", "stage": "P2", "role": "参考图理解、角色一致性检查、分镜图审核"},
+    {"family": "Qwen-TTS", "stage": "P2", "role": "角色配音、旁白、声音风格设计"},
+    {"family": "Qwen-ASR", "stage": "P2", "role": "语音输入、字幕转写、素材检索"},
+    {"family": "Qwen-Omni", "stage": "P3", "role": "图文音视频统一理解与生产研究"},
+    {"family": "Qwen-Agent", "stage": "P3", "role": "短剧生产工作流编排与工具调用"},
+    {"family": "Qwen-Coder", "stage": "Aux", "role": "平台工程、插件和自动化脚本开发辅助"}
+  ]
+}

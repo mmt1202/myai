@@ -141,6 +141,17 @@ python scripts/convert_to_messages.py --input datasets/train.jsonl --output outp
 
 多轮数据建设说明见 `docs/multiturn_data.md`。
 
+## Qwen 生态扩展规划
+
+当前第一版聚焦文本 SFT，但项目已经开始沉淀“AI 短剧全链路模型工厂”的 Qwen 生态路线：
+
+```bash
+python scripts/plan_qwen_ecosystem.py
+python scripts/plan_qwen_ecosystem.py --stage P2
+```
+
+模型家族规划配置见 `datasets/model_family_matrix.json`，长期扩展说明见 `docs/qwen_ecosystem_strategy.md`。
+
 ## 数据集建设计划
 
 数据任务比例配置在 `datasets/task_mix.json`，可以按 500/1000/3000 条目标生成建设计划：
