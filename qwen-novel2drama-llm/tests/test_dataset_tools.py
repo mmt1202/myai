@@ -22,6 +22,7 @@ from corpus_to_sft_template import convert_corpus  # noqa: E402
 from check_environment import build_report  # noqa: E402
 from plan_dataset_mix import load_mix, plan_counts  # noqa: E402
 from convert_to_messages import convert_record  # noqa: E402
+from plan_qwen_ecosystem import filter_by_stage, load_matrix  # noqa: E402
 
 sys.path.insert(0, str(PROJECT_ROOT / "eval"))
 from compare_results import compare  # noqa: E402
@@ -143,6 +144,12 @@ class DatasetToolTests(unittest.TestCase):
         self.assertEqual(len(converted["messages"]), 3)
         self.assertEqual(converted["messages"][0]["role"], "system")
         self.assertIn("输入", converted["messages"][1]["content"])
+
+    def test_plan_qwen_ecosystem_filters_stage(self) -> None:
+        matrix = load_matrix(PROJECT_ROOT / "datasets" / "model_family_matrix.json")
+        p2_rows = filter_by_stage(matrix, "P2")
+        self.assertTrue(any("VL" in row["family"] for row in p2_rows))
+        self.assertTrue(any("TTS" in row["family"] for row in p2_rows))
 
     def test_project_checker_current_project(self) -> None:
         self.assertEqual(collect_errors(PROJECT_ROOT), [])

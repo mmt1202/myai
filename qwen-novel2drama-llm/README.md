@@ -2,6 +2,18 @@
 
 基于 Qwen 开源大模型的“小说转 AI 短剧专用大模型”LoRA / QLoRA 微调工程。项目目标不是从 0 预训练 GPT 级模型，而是在 Qwen2.5-Instruct 等底座上做垂直领域 SFT，服务小说理解、短剧大纲、分集剧情、角色设定、场景设定、竖屏分镜、AI 视频提示词、配音台词、爽点反转设计和后续业务平台接入。
 
+
+## Qwen 生态扩展定位
+
+当前工程第一版聚焦“小说文本 → 短剧结构化资产”，但长期不应局限于小说转短剧。更完整的产品路线是 **AI 短剧全链路模型工厂**：文本编剧、视觉理解、分镜导演、视频提示词、配音/TTS、ASR、Agent 工作流。
+
+```bash
+python scripts/plan_qwen_ecosystem.py
+python scripts/plan_qwen_ecosystem.py --stage P2
+```
+
+详细策略见 `docs/qwen_ecosystem_strategy.md`。
+
 ## 为什么选择 Qwen
 
 Qwen 系列中文能力强、生态完善、开源模型尺寸丰富，适合从 1.5B 到 7B 逐步验证。第一版优先支持：
