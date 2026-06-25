@@ -1,0 +1,114 @@
+{
+  "product_line": "ai_drama_comic_factory",
+  "priority": "primary_product_after_foundation",
+  "principle": "AI drama and AI comic production is the first major product line, but it must be built on a universal AI foundation.",
+  "model_strategy": {
+    "local_foundation_model": [
+      "story reasoning",
+      "episode planning",
+      "task decomposition",
+      "structured production workflow",
+      "quality control",
+      "multi-model orchestration"
+    ],
+    "external_models": [
+      "image generation",
+      "image-to-video generation",
+      "text-to-video generation",
+      "voice generation",
+      "music and sound effects",
+      "ASR and subtitles",
+      "multimodal review"
+    ]
+  },
+  "capabilities": [
+    {
+      "id": "story_understanding",
+      "name": "小说和故事理解",
+      "stage": "Drama-P1",
+      "status": "planned",
+      "importance": "critical",
+      "description": "理解人物、冲突、爽点、反转、情绪曲线和商业短剧节奏。"
+    },
+    {
+      "id": "episode_planning",
+      "name": "集数规划和剧情拆分",
+      "stage": "Drama-P1",
+      "status": "planned",
+      "importance": "critical",
+      "description": "把长篇故事拆成短剧/漫剧集结构，控制每集钩子、结尾悬念和节奏。"
+    },
+    {
+      "id": "script_generation",
+      "name": "剧本生成和改写",
+      "stage": "Drama-P1",
+      "status": "planned",
+      "importance": "critical",
+      "description": "生成分场剧本、对白、旁白、动作描述和情绪标注。"
+    },
+    {
+      "id": "character_bible",
+      "name": "角色设定和一致性",
+      "stage": "Drama-P1",
+      "status": "planned",
+      "importance": "critical",
+      "description": "维护角色外貌、性格、服装、关系、成长线和视觉提示词。"
+    },
+    {
+      "id": "scene_bible",
+      "name": "场景设定和世界观一致性",
+      "stage": "Drama-P1",
+      "status": "planned",
+      "importance": "high",
+      "description": "维护地点、时间、环境、道具和视觉风格连续性。"
+    },
+    {
+      "id": "storyboard_planning",
+      "name": "分镜和镜头规划",
+      "stage": "Drama-P2",
+      "status": "planned",
+      "importance": "critical",
+      "description": "生成镜头序列、景别、运镜、构图、表演动作和时长建议。"
+    },
+    {
+      "id": "visual_prompting",
+      "name": "图像和视频提示词生成",
+      "stage": "Drama-P2",
+      "status": "planned",
+      "importance": "critical",
+      "description": "为即梦、Seedance、Sora、Runway、Kling、Flux、SD 等模型生成稳定提示词。"
+    },
+    {
+      "id": "asset_graph",
+      "name": "资产依赖图",
+      "stage": "Drama-P2",
+      "status": "planned",
+      "importance": "high",
+      "description": "追踪角色图、场景图、分镜图、视频片段、音频、字幕和成片之间的依赖关系。"
+    },
+    {
+      "id": "multi_model_routing",
+      "name": "多模型生产路由",
+      "stage": "Drama-P2",
+      "status": "planned",
+      "importance": "critical",
+      "description": "根据任务类型选择本地模型或外部模型，并记录模型、参数、输入和输出。"
+    },
+    {
+      "id": "quality_review",
+      "name": "质量审查和返工建议",
+      "stage": "Drama-P2",
+      "status": "planned",
+      "importance": "high",
+      "description": "检查角色一致性、剧情连贯性、画面问题、字幕问题和镜头衔接问题。"
+    },
+    {
+      "id": "publishing_package",
+      "name": "发布前物料整理",
+      "stage": "Drama-P3",
+      "status": "planned",
+      "importance": "high",
+      "description": "生成标题、封面提示词、简介、标签、分集信息和平台发布素材。"
+    }
+  ]
+}
