@@ -9,7 +9,9 @@ Implemented files:
 - `providers/__init__.py`
 - `providers/base.py`
 - `providers/openai_compatible.py`
+- `providers/factory.py`
 - `tests/test_provider_adapter_contract.py`
+- `tests/test_provider_factory.py`
 
 ## Base provider contract
 
@@ -45,6 +47,25 @@ It can:
 - return standard response envelopes
 - normalize HTTP and connection errors
 
+## Provider factory
+
+`providers/factory.py` can:
+
+- find a model instance by id or alias
+- build a provider from model instance metadata
+- call a provider through `generate_with_registry`
+- return standard response envelopes on provider errors
+
+Dry-run through factory:
+
+```bash
+python providers/factory.py \
+  --request examples/provider_request.json \
+  --instances configs/model_instance_registry.json \
+  --model-id external.openai_compatible.smart \
+  --base-url http://localhost:8000/v1
+```
+
 ## Dry run
 
 ```bash
@@ -78,12 +99,12 @@ MODEL_API_KEY=your_key python providers/openai_compatible.py \
 - Streaming is not implemented yet.
 - Provider-specific tokenizer reconciliation is not implemented yet.
 - Provider health probing is basic.
+- Agent runtime does not yet execute provider calls.
 
 ## Next steps
 
 - Integrate provider adapter into `agent/runtime.py`.
 - Add local provider adapter for the existing text runtime.
-- Add provider registry and factory.
 - Add streaming support.
 - Add image/video/audio provider adapter interfaces.
 - Add actual usage ledger reconciliation after provider calls.
