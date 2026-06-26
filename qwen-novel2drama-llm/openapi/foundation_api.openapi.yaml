@@ -2,12 +2,15 @@ openapi: 3.1.0
 info:
   title: MyAI Foundation API
   version: 0.1.0
-  description: Deployable AI foundation API for routing, chat, reasoning, multimodal analysis, token/cost, memory, rules, skills, MCP and agent orchestration.
+  description: Deployable AI foundation API for routing, chat, reasoning, multimodal analysis, token/cost, memory, rules, skills, MCP, auth and agent orchestration.
 servers:
   - url: http://localhost:8000
+security:
+  - ApiKeyAuth: []
 paths:
   /v1/health:
     get:
+      security: []
       summary: Get foundation service health and runtime capabilities
       operationId: getFoundationHealth
       responses:
@@ -28,569 +31,268 @@ paths:
             schema:
               $ref: '#/components/schemas/FoundationRequest'
       responses:
-        '200':
-          description: Chat response or provider preflight result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: Chat response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
+        '401': {description: Missing or invalid API key, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
+        '403': {description: Scope or workspace denied, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/reason:
     post:
       summary: Controlled reasoning and task decomposition
       operationId: createReasoning
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FoundationRequest'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationRequest'}}}}
       responses:
-        '200':
-          description: Reasoning response or provider preflight result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: Reasoning response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/multimodal/analyze:
     post:
       summary: Analyze text, image, video, audio, file or URL content blocks
       operationId: analyzeMultimodal
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FoundationRequest'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationRequest'}}}}
       responses:
-        '200':
-          description: Multimodal analysis response or provider preflight result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: Multimodal analysis response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/route:
     post:
       summary: Route a request to a model instance without executing a provider
       operationId: routeModel
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FoundationRequest'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationRequest'}}}}
       responses:
-        '200':
-          description: Route decision
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: Route decision, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/token/count:
     post:
       summary: Count estimated tokens and multimodal billable units
       operationId: countTokens
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FoundationRequest'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationRequest'}}}}
       responses:
-        '200':
-          description: Token usage estimate
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: Token usage estimate, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/cost/estimate:
     post:
       summary: Estimate model cost before execution
       operationId: estimateCost
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FoundationRequest'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationRequest'}}}}
       responses:
-        '200':
-          description: Cost estimate
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: Cost estimate, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/memory/search:
     post:
       summary: Search scoped memory
       operationId: searchMemory
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MemoryRequest'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/MemoryRequest'}}}}
       responses:
-        '200':
-          description: Memory search result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: Memory search result, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/memory/write:
     post:
       summary: Write scoped memory
       operationId: writeMemory
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MemoryWriteRequest'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/MemoryWriteRequest'}}}}
       responses:
-        '200':
-          description: Memory write result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: Memory write result, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/rules/evaluate:
     post:
       summary: Evaluate routing, budget, provider, memory and tool rules
       operationId: evaluateRules
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RuleRequest'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RuleRequest'}}}}
       responses:
-        '200':
-          description: Rule decision
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: Rule decision, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/skills/list:
     get:
       summary: List registered foundation skills
       operationId: listSkills
       parameters:
-        - in: query
-          name: category
-          required: false
-          schema:
-            type: string
-        - in: query
-          name: status
-          required: false
-          schema:
-            type: string
-        - in: query
-          name: capability
-          required: false
-          schema:
-            type: string
-        - in: query
-          name: include_planned
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - {in: query, name: category, required: false, schema: {type: string}}
+        - {in: query, name: status, required: false, schema: {type: string}}
+        - {in: query, name: capability, required: false, schema: {type: string}}
+        - {in: query, name: include_planned, required: false, schema: {type: boolean, default: false}}
       responses:
-        '200':
-          description: Skill list
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: Skill list, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/skills/call:
     post:
       summary: Call a registered skill with explicit permissions
       operationId: callSkill
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SkillCallRequest'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/SkillCallRequest'}}}}
       responses:
-        '200':
-          description: Skill call result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: Skill call result, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/mcp/tools:
     get:
       summary: List MCP-style tools exposed from foundation skills
       operationId: listMcpTools
       parameters:
-        - in: query
-          name: include_planned
-          required: false
-          schema:
-            type: boolean
-            default: false
+        - {in: query, name: include_planned, required: false, schema: {type: boolean, default: false}}
       responses:
-        '200':
-          description: MCP tool list
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: MCP tool list, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/mcp/call:
     post:
       summary: Call an MCP-style tool through the foundation MCP adapter
       operationId: callMcpTool
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/McpCallRequest'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/McpCallRequest'}}}}
       responses:
-        '200':
-          description: MCP tool call result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: MCP tool call result, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/agent/run:
     post:
       summary: Run the foundation agent runtime
       operationId: runAgent
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AgentRunRequest'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRunRequest'}}}}
       responses:
-        '200':
-          description: Agent run response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
+        '200': {description: Agent run response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
 components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Optional in local development unless FOUNDATION_AUTH_REQUIRED=true. Use X-Workspace-Id to bind a request to a workspace.
   schemas:
     HealthResponse:
       type: object
       required: [status, service, capabilities]
       properties:
-        status:
-          type: string
-        service:
-          type: string
-        model_version:
-          type:
-            - string
-            - 'null'
-        model_path:
-          type:
-            - string
-            - 'null'
-        capabilities:
-          type: array
-          items:
-            type: string
+        status: {type: string}
+        service: {type: string}
+        model_version: {type: [string, 'null']}
+        model_path: {type: [string, 'null']}
+        capabilities: {type: array, items: {type: string}}
       additionalProperties: true
     FoundationRequest:
       type: object
       properties:
-        request_id:
-          type: string
-        trace_id:
-          type: string
-        route_mode:
-          type: string
-          enum: [smart, cheap, balanced, local_first, cloud_first, drama_specialist, code_specialist]
-        required_capabilities:
-          type: array
-          items:
-            type: string
-        input:
-          type: array
-          items:
-            $ref: '#/components/schemas/ContentBlock'
-        task:
-          type: string
-        system:
-          type: string
-        developer:
-          type: string
-        model_id:
-          type: string
-        model:
-          type: string
-        execute_provider:
-          type: boolean
-          default: false
-        dry_run_provider:
-          type: boolean
-          default: false
-        base_url:
-          type: string
-        api_key_env:
-          type: string
-          default: MODEL_API_KEY
-        expected_output_tokens:
-          type: integer
-        expected_reasoning_tokens:
-          type: integer
-        max_output_tokens:
-          type: integer
-        temperature:
-          type: number
-        memory:
-          type: object
-          additionalProperties: true
-        rules:
-          type: object
-          additionalProperties: true
-        budget:
-          type: object
-          additionalProperties: true
-        privacy:
-          type: object
-          additionalProperties: true
-        max_sensitivity:
-          type: string
-        stream:
-          type: boolean
-          default: false
-        tools:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
-        tool_choice:
-          type: object
-          additionalProperties: true
+        request_id: {type: string}
+        trace_id: {type: string}
+        workspace_id: {type: string}
+        route_mode: {type: string, enum: [smart, cheap, balanced, local_first, cloud_first, drama_specialist, code_specialist]}
+        required_capabilities: {type: array, items: {type: string}}
+        input: {type: array, items: {$ref: '#/components/schemas/ContentBlock'}}
+        task: {type: string}
+        system: {type: string}
+        developer: {type: string}
+        model_id: {type: string}
+        model: {type: string}
+        execute_provider: {type: boolean, default: false}
+        dry_run_provider: {type: boolean, default: false}
+        base_url: {type: string}
+        api_key_env: {type: string, default: MODEL_API_KEY}
+        expected_output_tokens: {type: integer}
+        expected_reasoning_tokens: {type: integer}
+        max_output_tokens: {type: integer}
+        temperature: {type: number}
+        memory: {type: object, additionalProperties: true}
+        rules: {type: object, additionalProperties: true}
+        budget: {type: object, additionalProperties: true}
+        privacy: {type: object, additionalProperties: true}
+        max_sensitivity: {type: string}
+        stream: {type: boolean, default: false}
+        tools: {type: array, items: {type: object, additionalProperties: true}}
+        tool_choice: {type: object, additionalProperties: true}
       additionalProperties: true
     ContentBlock:
       type: object
       required: [type]
       properties:
-        type:
-          type: string
-          enum: [text, image, video, audio, subtitle, metadata, file, url, tool_result, reasoning_hint]
-        text:
-          type: string
-        uri:
-          type: string
-        file_id:
-          type: string
-        filename:
-          type: string
-        mime_type:
-          type: string
-        metadata:
-          type: object
-          additionalProperties: true
-        width:
-          type: integer
-        height:
-          type: integer
-        duration_ms:
-          type: integer
+        type: {type: string, enum: [text, image, video, audio, subtitle, metadata, file, url, tool_result, reasoning_hint]}
+        text: {type: string}
+        uri: {type: string}
+        file_id: {type: string}
+        filename: {type: string}
+        mime_type: {type: string}
+        metadata: {type: object, additionalProperties: true}
+        width: {type: integer}
+        height: {type: integer}
+        duration_ms: {type: integer}
       additionalProperties: true
     FoundationResponse:
       type: object
       required: [request_id, status]
       properties:
-        request_id:
-          type: string
-        trace_id:
-          type: string
-        status:
-          type: string
-          enum: [ok, queued, running, waiting_tool, waiting_approval, failed, cancelled]
-        model:
-          type: object
-          additionalProperties: true
-        usage:
-          type: object
-          additionalProperties: true
-        cost:
-          type: object
-          additionalProperties: true
-        output:
-          type: object
-          additionalProperties: true
-        warnings:
-          type: array
-          items:
-            type: string
-        error:
-          type:
-            - object
-            - 'null'
-          additionalProperties: true
-        route:
-          type: object
-          additionalProperties: true
-        created_at:
-          type: string
+        request_id: {type: string}
+        trace_id: {type: string}
+        status: {type: string, enum: [ok, queued, running, waiting_tool, waiting_approval, failed, cancelled]}
+        model: {type: object, additionalProperties: true}
+        usage: {type: object, additionalProperties: true}
+        cost: {type: object, additionalProperties: true}
+        output: {type: object, additionalProperties: true}
+        warnings: {type: array, items: {type: string}}
+        error: {type: [object, 'null'], additionalProperties: true}
+        route: {type: object, additionalProperties: true}
+        created_at: {type: string}
       additionalProperties: true
     MemoryRequest:
       type: object
       properties:
-        scope:
-          type: string
-          enum: [session, user, project, task]
-        owner_id:
-          type: string
-        project_id:
-          type: string
-        session_id:
-          type: string
-        task_id:
-          type: string
-        query:
-          type: string
-        tags:
-          type: array
-          items:
-            type: string
-        max_sensitivity:
-          type: string
-        include_expired:
-          type: boolean
-        limit:
-          type: integer
+        scope: {type: string, enum: [session, user, project, task]}
+        owner_id: {type: string}
+        project_id: {type: string}
+        session_id: {type: string}
+        task_id: {type: string}
+        workspace_id: {type: string}
+        query: {type: string}
+        tags: {type: array, items: {type: string}}
+        max_sensitivity: {type: string}
+        include_expired: {type: boolean}
+        limit: {type: integer}
       additionalProperties: true
     MemoryWriteRequest:
       type: object
       properties:
-        item:
-          type: object
-          additionalProperties: true
+        workspace_id: {type: string}
+        item: {type: object, additionalProperties: true}
       additionalProperties: true
     RuleRequest:
       type: object
       properties:
-        ruleset:
-          type: object
-          additionalProperties: true
-        context:
-          type: object
-          additionalProperties: true
+        workspace_id: {type: string}
+        ruleset: {type: object, additionalProperties: true}
+        context: {type: object, additionalProperties: true}
       additionalProperties: true
     SkillCallRequest:
       type: object
       required: [name]
       properties:
-        name:
-          type: string
-        arguments:
-          type: object
-          additionalProperties: true
-        allow_provider:
-          type: boolean
-          default: false
-        allow_write:
-          type: boolean
-          default: false
-        approved:
-          type: boolean
-          default: false
+        workspace_id: {type: string}
+        name: {type: string}
+        arguments: {type: object, additionalProperties: true}
+        allow_provider: {type: boolean, default: false}
+        allow_write: {type: boolean, default: false}
+        approved: {type: boolean, default: false}
       additionalProperties: true
     McpCallRequest:
       type: object
       required: [name]
       properties:
-        name:
-          type: string
-        arguments:
-          type: object
-          additionalProperties: true
-        allow_provider:
-          type: boolean
-          default: false
-        allow_write:
-          type: boolean
-          default: false
-        approved:
-          type: boolean
-          default: false
+        workspace_id: {type: string}
+        name: {type: string}
+        arguments: {type: object, additionalProperties: true}
+        allow_provider: {type: boolean, default: false}
+        allow_write: {type: boolean, default: false}
+        approved: {type: boolean, default: false}
       additionalProperties: true
     AgentSkillCall:
       type: object
       required: [name]
       properties:
-        name:
-          type: string
-        skill_id:
-          type: string
-        arguments:
-          type: object
-          additionalProperties: true
-        allow_provider:
-          type: boolean
-          default: false
-        allow_write:
-          type: boolean
-          default: false
-        approved:
-          type: boolean
-          default: false
-        continue_on_error:
-          type: boolean
-          default: false
+        name: {type: string}
+        skill_id: {type: string}
+        arguments: {type: object, additionalProperties: true}
+        allow_provider: {type: boolean, default: false}
+        allow_write: {type: boolean, default: false}
+        approved: {type: boolean, default: false}
+        continue_on_error: {type: boolean, default: false}
       additionalProperties: true
     AgentRunRequest:
       type: object
       required: [task]
       properties:
-        run_id:
-          type: string
-        session_id:
-          type: string
-        owner_id:
-          type: string
-        project_id:
-          type: string
-        task:
-          type: string
-        input:
-          type: array
-          items:
-            $ref: '#/components/schemas/ContentBlock'
-        route_mode:
-          type: string
-          enum: [smart, cheap, balanced, local_first, cloud_first, drama_specialist, code_specialist]
-        approval_policy:
-          type: string
-          enum: [never, on_write, on_cost, always]
-        execute_provider:
-          type: boolean
-          default: false
-        dry_run_provider:
-          type: boolean
-          default: false
-        base_url:
-          type: string
-        api_key_env:
-          type: string
-          default: MODEL_API_KEY
-        skill_calls:
-          type: array
-          items:
-            $ref: '#/components/schemas/AgentSkillCall'
-        allow_skill_provider:
-          type: boolean
-          default: false
-        allow_skill_write:
-          type: boolean
-          default: false
-        approve_skills:
-          type: boolean
-          default: false
-        budget:
-          type: object
-          additionalProperties: true
-        privacy:
-          type: object
-          additionalProperties: true
+        run_id: {type: string}
+        session_id: {type: string}
+        owner_id: {type: string}
+        project_id: {type: string}
+        workspace_id: {type: string}
+        task: {type: string}
+        input: {type: array, items: {$ref: '#/components/schemas/ContentBlock'}}
+        route_mode: {type: string, enum: [smart, cheap, balanced, local_first, cloud_first, drama_specialist, code_specialist]}
+        approval_policy: {type: string, enum: [never, on_write, on_cost, always]}
+        execute_provider: {type: boolean, default: false}
+        dry_run_provider: {type: boolean, default: false}
+        base_url: {type: string}
+        api_key_env: {type: string, default: MODEL_API_KEY}
+        skill_calls: {type: array, items: {$ref: '#/components/schemas/AgentSkillCall'}}
+        allow_skill_provider: {type: boolean, default: false}
+        allow_skill_write: {type: boolean, default: false}
+        approve_skills: {type: boolean, default: false}
+        budget: {type: object, additionalProperties: true}
+        privacy: {type: object, additionalProperties: true}
       additionalProperties: true
