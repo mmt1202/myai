@@ -9,8 +9,10 @@ Implemented files:
 - `configs/schemas/agent_run_schema.json`
 - `agent/__init__.py`
 - `agent/runtime.py`
+- `agent/events.py`
 - `agent/tool_loop.py`
 - `tests/test_agent_runtime.py`
+- `tests/test_agent_events.py`
 - `tests/test_agent_tool_loop.py`
 
 ## Run states
@@ -43,23 +45,92 @@ Current runtime supports approval gates from rule decisions and cost thresholds.
 `run_agent_once` currently performs:
 
 1. create run
-2. transition to running
-3. build foundation request
-4. route model
-5. estimate usage and cost through router output
-6. evaluate rules
-7. apply approval gate when needed
-8. optionally execute request-defined skills
-9. optionally execute provider through provider factory
-10. optionally execute model-decided tool calls returned by the provider
-11. record estimated or actual usage in a run-local usage ledger
-12. write `agent_run_report.json`
+2. write `run_created` event
+3. transition to running
+4. build foundation request
+5. route model
+6. estimate usage and cost through router output
+7. evaluate rules
+8. apply approval gate when needed
+9. optionally execute request-defined skills
+10. optionally execute provider through provider factory
+11. optionally execute model-decided tool calls returned by the provider
+12. record estimated or actual usage in a run-local usage ledger
+13. write `events.jsonl`
+14. write `agent_run_report.json`
 
 Possible final states:
 
 - `completed`
 - `waiting_approval`
 - `failed`
+
+## Agent event stream
+
+The runtime writes a JSONL event stream for every run by default:
+
+```text
+outputs/agent_runtime/<run>/events.jsonl
+```
+
+The final run report includes:
+
+- `artifacts.events`
+- `event_summary`
+
+Common event types:
+
+- `run_created`
+- `run_started`
+- `route_started`
+- `route_completed`
+- `route_failed`
+- `rules_started`
+- `rules_completed`
+- `run_waiting_approval`
+- `skill_loop_started`
+- `skill_call_started`
+- `skill_call_completed`
+- `skill_call_failed`
+- `skill_loop_completed`
+- `skill_loop_failed`
+- `provider_started`
+- `provider_completed`
+- `provider_failed`
+- `provider_skipped`
+- `model_tool_loop_started`
+- `model_tool_loop_completed`
+- `model_tool_loop_failed`
+- `run_completed`
+- `run_failed`
+
+Read events:
+
+```bash
+python agent/events.py --events outputs/agent_runtime/demo/events.jsonl
+```
+
+Read summary:
+
+```bash
+python agent/events.py --events outputs/agent_runtime/demo/events.jsonl --summary
+```
+
+Disable event writing for a run:
+
+```json
+{
+  "disable_events": true
+}
+```
+
+or CLI:
+
+```bash
+python agent/runtime.py --request examples/agent_request.json --disable-events
+```
+
+This is file-backed event streaming v1. It is not SSE/WebSocket yet.
 
 ## Request-driven skill loop
 
@@ -97,13 +168,14 @@ The run request also supports default skill permissions:
 When the request-driven skill loop runs, the runtime writes:
 
 - `skill_results.json`
+- `events.jsonl`
 - `agent_run_report.json`
 
 A denied or failing skill fails the run unless `continue_on_error` is true for that skill call.
 
 ## Model-decided tool loop
 
-The runtime can now inspect provider responses for OpenAI-style `tool_calls`.
+The runtime can inspect provider responses for OpenAI-style `tool_calls`.
 
 Enable it with:
 
@@ -156,6 +228,7 @@ Model tool-loop permissions:
 The runtime writes:
 
 - `model_tool_loop.json`
+- `events.jsonl`
 - `agent_run_report.json`
 
 ## Provider execution
@@ -183,6 +256,7 @@ When provider execution runs, the runtime writes:
 
 - `provider_response.json`
 - `usage_ledger.jsonl`
+- `events.jsonl`
 - `agent_run_report.json`
 
 ## CLI
@@ -248,18 +322,17 @@ python agent/runtime.py \
 
 ## Current limitations
 
+- Event stream is JSONL-file backed, not SSE/WebSocket yet.
 - Local provider is text-only and loads model weights in-process.
 - Model-decided tool loop is synchronous.
 - Tool names must map to registered foundation skill ids.
-- No streaming tool-call events yet.
 - Resume from existing run files is not implemented yet.
 - Database persistence is not implemented yet.
 - Approval resolution is not implemented yet.
 
 ## Next steps
 
-- Add OpenAPI fields for model tool-loop controls.
-- Add local provider concurrency and cache controls.
+- Add SSE endpoint for live run events.
 - Add resume/cancel/retry CLI commands.
-- Add streaming run events.
 - Add provider usage reconciliation into the global usage ledger.
+- Add workspace-level budget and quota checks.
