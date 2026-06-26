@@ -9,7 +9,9 @@ Implemented files:
 - `configs/schemas/agent_run_schema.json`
 - `agent/__init__.py`
 - `agent/runtime.py`
+- `agent/tool_loop.py`
 - `tests/test_agent_runtime.py`
+- `tests/test_agent_tool_loop.py`
 
 ## Run states
 
@@ -47,10 +49,11 @@ Current runtime supports approval gates from rule decisions and cost thresholds.
 5. estimate usage and cost through router output
 6. evaluate rules
 7. apply approval gate when needed
-8. optionally execute registered skills
+8. optionally execute request-defined skills
 9. optionally execute provider through provider factory
-10. record estimated or actual usage in a run-local usage ledger
-11. write `agent_run_report.json`
+10. optionally execute model-decided tool calls returned by the provider
+11. record estimated or actual usage in a run-local usage ledger
+12. write `agent_run_report.json`
 
 Possible final states:
 
@@ -58,7 +61,7 @@ Possible final states:
 - `waiting_approval`
 - `failed`
 
-## Skill loop
+## Request-driven skill loop
 
 The runtime accepts `skill_calls` in the request.
 
@@ -91,18 +94,75 @@ The run request also supports default skill permissions:
 - `allow_skill_write`
 - `approve_skills`
 
-When the skill loop runs, the runtime writes:
+When the request-driven skill loop runs, the runtime writes:
 
 - `skill_results.json`
 - `agent_run_report.json`
 
 A denied or failing skill fails the run unless `continue_on_error` is true for that skill call.
 
+## Model-decided tool loop
+
+The runtime can now inspect provider responses for OpenAI-style `tool_calls`.
+
+Enable it with:
+
+```json
+{
+  "execute_provider": true,
+  "enable_model_tool_loop": true,
+  "max_tool_rounds": 3
+}
+```
+
+Supported provider response shapes:
+
+```json
+{
+  "output": {
+    "raw_message": {
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "type": "function",
+          "function": {
+            "name": "foundation.token_count",
+            "arguments": "{\"request\":{\"input\":[{\"type\":\"text\",\"text\":\"hello\"}]}}"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+For each model-decided tool call, the runtime:
+
+1. normalizes the tool call
+2. maps the tool name to a registered foundation skill
+3. checks tool-loop permissions
+4. executes the skill
+5. appends a `tool_result` content block to the next provider request
+6. calls the provider again
+7. repeats until no more tool calls or `max_tool_rounds` is reached
+
+Model tool-loop permissions:
+
+- `allow_model_tool_provider`
+- `allow_model_tool_write`
+- `approve_model_tools`
+- `fail_on_model_tool_error`
+
+The runtime writes:
+
+- `model_tool_loop.json`
+- `agent_run_report.json`
+
 ## Provider execution
 
 Provider execution is disabled by default.
 
-Without `execute_provider`, the runtime stops after routing, policy checks and optional skill calls, records estimated usage, and marks the run completed with a `ready_for_provider` step.
+Without `execute_provider`, the runtime stops after routing, policy checks and optional request-driven skill calls, records estimated usage, and marks the run completed with a `ready_for_provider` step.
 
 To execute a provider:
 
@@ -117,7 +177,7 @@ To execute a provider:
 
 `dry_run_provider` is useful for testing provider payload generation without network calls or local model loading.
 
-Local provider execution is now supported through `providers/local_text.py`. Real local execution requires `model_path` in the request or `FOUNDATION_LOCAL_MODEL_PATH`.
+Local provider execution is supported through `providers/local_text.py`. Real local execution requires `model_path` in the request or `FOUNDATION_LOCAL_MODEL_PATH`.
 
 When provider execution runs, the runtime writes:
 
@@ -146,6 +206,17 @@ python agent/runtime.py \
   --base-url http://localhost:8000/v1
 ```
 
+Model tool-loop mode:
+
+```bash
+python agent/runtime.py \
+  --request examples/agent_request.json \
+  --output-dir outputs/agent_runtime/demo \
+  --execute-provider \
+  --enable-model-tool-loop \
+  --max-tool-rounds 3
+```
+
 Local provider real execution:
 
 ```bash
@@ -164,42 +235,30 @@ python agent/runtime.py \
   --approve-skills
 ```
 
-Example request:
+Model tool permissions can also be passed through CLI:
 
-```json
-{
-  "task": "summarize this request",
-  "route_mode": "smart",
-  "approval_policy": "never",
-  "execute_provider": true,
-  "dry_run_provider": true,
-  "skill_calls": [
-    {
-      "name": "foundation.token_count",
-      "arguments": {
-        "request": {"input": [{"type": "text", "text": "hello"}]},
-        "expected_output_tokens": 10
-      }
-    }
-  ],
-  "input": [
-    {"type": "text", "text": "hello"}
-  ]
-}
+```bash
+python agent/runtime.py \
+  --request examples/agent_request.json \
+  --execute-provider \
+  --enable-model-tool-loop \
+  --allow-model-tool-write \
+  --approve-model-tools
 ```
 
 ## Current limitations
 
 - Local provider is text-only and loads model weights in-process.
-- Tool loop is synchronous and skill-call based; model-decided multi-turn tool calling is not implemented yet.
+- Model-decided tool loop is synchronous.
+- Tool names must map to registered foundation skill ids.
+- No streaming tool-call events yet.
 - Resume from existing run files is not implemented yet.
 - Database persistence is not implemented yet.
 - Approval resolution is not implemented yet.
-- Streaming run events are not implemented yet.
 
 ## Next steps
 
-- Add model-decided tool loop.
+- Add OpenAPI fields for model tool-loop controls.
 - Add local provider concurrency and cache controls.
 - Add resume/cancel/retry CLI commands.
 - Add streaming run events.
