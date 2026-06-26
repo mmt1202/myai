@@ -67,6 +67,9 @@ class OpenAICompatibleProvider(BaseProvider):
             method="POST",
         )
 
+    def is_dry_run(self, request: dict[str, Any]) -> bool:
+        return bool(request.get("dry_run") or request.get("dry_run_provider"))
+
     def parse_chat_response(self, data: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
         choices = data.get("choices") or []
         if not choices:
@@ -85,7 +88,7 @@ class OpenAICompatibleProvider(BaseProvider):
 
     def generate(self, request: dict[str, Any]) -> dict[str, Any]:
         payload = self.build_payload({**request, "stream": False})
-        if request.get("dry_run"):
+        if self.is_dry_run(request):
             return response_envelope(
                 status="ok",
                 output={"dry_run": True, "provider_payload": payload, "url": f"{self.base_url}/chat/completions"},
@@ -152,7 +155,7 @@ class OpenAICompatibleProvider(BaseProvider):
             model=model_info,
             metadata={"provider": self.provider_name, "url": f"{self.base_url}/chat/completions"},
         )
-        if request.get("dry_run"):
+        if self.is_dry_run(request):
             yield provider_stream_event(
                 "provider_stream_delta",
                 request_id_value=request_id_value,
@@ -178,7 +181,7 @@ class OpenAICompatibleProvider(BaseProvider):
         finish_reason: str | None = None
         try:
             with urllib.request.urlopen(http_request, timeout=self.timeout) as response:
-                for index, data in enumerate(self.iter_sse_json(response)):
+                for data in self.iter_sse_json(response):
                     if data.get("usage"):
                         usage = normalize_usage(data.get("usage") or {})
                     reason = self.stream_finish_reason(data)
