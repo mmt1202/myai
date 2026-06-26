@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from agent.tool_loop import run_model_tool_loop
 from inference.model_router import route_model
 from providers.base import ProviderError
 from providers.factory import generate_with_registry
@@ -64,6 +65,7 @@ def create_run(request: dict[str, Any]) -> dict[str, Any]:
         "route_decision": None,
         "rule_decision": None,
         "skill_results": [],
+        "model_tool_loop": None,
         "provider_response": None,
         "usage": {},
         "cost": {},
@@ -174,6 +176,9 @@ def build_provider_request(request: dict[str, Any], foundation_request: dict[str
     provider_request["dry_run"] = bool(request.get("dry_run_provider"))
     provider_request["base_url"] = request.get("base_url")
     provider_request["api_key_env"] = request.get("api_key_env") or "MODEL_API_KEY"
+    provider_request["model_path"] = request.get("model_path")
+    provider_request["adapter_path"] = request.get("adapter_path")
+    provider_request["system_prompt_file"] = request.get("system_prompt_file")
     return provider_request
 
 
@@ -249,7 +254,7 @@ def run_skill_loop(project_root: Path, output_dir: Path, run: dict[str, Any], re
     add_step(run, "skill_loop_completed", output_data={"skill_result_count": len(results)})
 
 
-def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any]) -> None:
+def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any]) -> dict[str, Any]:
     selected_model_id = route_decision.get("selected_model_id")
     if not selected_model_id:
         raise ProviderError("model_not_found", "selected model id is missing")
@@ -271,6 +276,36 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
     add_step(run, "provider_generate", input_data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run")}, output_data=response, status="completed" if response.get("status") == "ok" else "failed")
     if response.get("status") != "ok":
         raise ProviderError("provider_error", "provider response was not ok", details=response)
+    return response
+
+
+def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any], provider_response: dict[str, Any]) -> None:
+    if not request.get("enable_model_tool_loop"):
+        return
+    selected_model_id = route_decision.get("selected_model_id")
+    if not selected_model_id:
+        return
+    max_rounds = int(request.get("max_tool_rounds") or 3)
+    summary = run_model_tool_loop(
+        project_root=project_root,
+        output_dir=output_dir,
+        request=request,
+        foundation_request=foundation_request,
+        instances=instances,
+        selected_model_id=selected_model_id,
+        initial_provider_response=provider_response,
+        max_rounds=max_rounds,
+    )
+    run["model_tool_loop"] = summary
+    if summary.get("final_provider_response"):
+        run["provider_response"] = summary["final_provider_response"]
+    if (run.get("provider_response") or {}).get("usage"):
+        run["usage"] = run["provider_response"]["usage"]
+    if (run.get("provider_response") or {}).get("cost"):
+        run["cost"] = run["provider_response"]["cost"]
+    add_step(run, "model_tool_loop", status="completed" if summary.get("status") == "ok" else "failed", output_data={"status": summary.get("status"), "round_count": summary.get("round_count", len(summary.get("rounds", []))), "error": summary.get("error")})
+    if summary.get("status") != "ok":
+        raise SkillError(str(summary.get("error") or "model tool loop failed"))
 
 
 def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path, instances_path: Path | None = None, rules_path: Path | None = None) -> dict[str, Any]:
@@ -320,8 +355,13 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
         else:
             if request.get("execute_provider"):
                 try:
-                    run_provider_step(project_root, output_dir, run, request, foundation_request, route_decision, instances)
+                    provider_response = run_provider_step(project_root, output_dir, run, request, foundation_request, route_decision, instances)
+                    maybe_run_model_tool_loop(project_root, output_dir, run, request, foundation_request, route_decision, instances, provider_response)
                     transition(run, "completed")
+                except SkillError as exc:
+                    run["error"] = "model_tool_loop_failed"
+                    add_step(run, "model_tool_loop_error", status="failed", output_data={"message": str(exc)}, error=str(exc))
+                    transition(run, "failed")
                 except ProviderError as exc:
                     run["error"] = exc.code
                     add_step(run, "provider_error", status="failed", output_data={"code": exc.code, "message": exc.message, "details": exc.details}, error=exc.message)
@@ -339,6 +379,8 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
         run["artifacts"]["provider_response"] = str(output_dir / "provider_response.json")
     if run.get("skill_results"):
         run["artifacts"]["skill_results"] = str(output_dir / "skill_results.json")
+    if run.get("model_tool_loop"):
+        run["artifacts"]["model_tool_loop"] = str(output_dir / "model_tool_loop.json")
     save_json(output_dir / "agent_run_report.json", run)
     return run
 
@@ -352,11 +394,16 @@ def main() -> int:
     parser.add_argument("--rules", default=None)
     parser.add_argument("--execute-provider", action="store_true")
     parser.add_argument("--dry-run-provider", action="store_true")
+    parser.add_argument("--enable-model-tool-loop", action="store_true")
+    parser.add_argument("--max-tool-rounds", type=int, default=None)
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--api-key-env", default="MODEL_API_KEY")
     parser.add_argument("--allow-skill-provider", action="store_true")
     parser.add_argument("--allow-skill-write", action="store_true")
     parser.add_argument("--approve-skills", action="store_true")
+    parser.add_argument("--allow-model-tool-provider", action="store_true")
+    parser.add_argument("--allow-model-tool-write", action="store_true")
+    parser.add_argument("--approve-model-tools", action="store_true")
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
     request = load_json(Path(args.request))
@@ -364,6 +411,10 @@ def main() -> int:
         request["execute_provider"] = True
     if args.dry_run_provider:
         request["dry_run_provider"] = True
+    if args.enable_model_tool_loop:
+        request["enable_model_tool_loop"] = True
+    if args.max_tool_rounds is not None:
+        request["max_tool_rounds"] = args.max_tool_rounds
     if args.base_url:
         request["base_url"] = args.base_url
     if args.api_key_env:
@@ -374,6 +425,12 @@ def main() -> int:
         request["allow_skill_write"] = True
     if args.approve_skills:
         request["approve_skills"] = True
+    if args.allow_model_tool_provider:
+        request["allow_model_tool_provider"] = True
+    if args.allow_model_tool_write:
+        request["allow_model_tool_write"] = True
+    if args.approve_model_tools:
+        request["approve_model_tools"] = True
     run = run_agent_once(
         project_root=project_root,
         request=request,
