@@ -50,10 +50,42 @@ class FoundationContractsTests(unittest.TestCase):
         for mode in ["smart", "cheap", "balanced", "local_first", "cloud_first", "drama_specialist", "code_specialist"]:
             self.assertIn(f"  {mode}:", text)
 
-    def test_openapi_contains_foundation_endpoints(self) -> None:
+    def test_openapi_contains_runtime_foundation_endpoints(self) -> None:
         text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
-        for endpoint in ["/v1/chat", "/v1/reason", "/v1/multimodal/analyze", "/v1/token/count", "/v1/cost/estimate", "/v1/agent/run"]:
+        for endpoint in [
+            "/v1/health",
+            "/v1/chat",
+            "/v1/reason",
+            "/v1/multimodal/analyze",
+            "/v1/route",
+            "/v1/token/count",
+            "/v1/cost/estimate",
+            "/v1/memory/search",
+            "/v1/memory/write",
+            "/v1/rules/evaluate",
+            "/v1/skills/list",
+            "/v1/skills/call",
+            "/v1/mcp/tools",
+            "/v1/mcp/call",
+            "/v1/agent/run",
+        ]:
             self.assertIn(endpoint, text)
+
+    def test_openapi_agent_schema_contains_provider_and_skill_loop_fields(self) -> None:
+        text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
+        for field in [
+            "execute_provider:",
+            "dry_run_provider:",
+            "skill_calls:",
+            "allow_skill_provider:",
+            "allow_skill_write:",
+            "approve_skills:",
+        ]:
+            self.assertIn(field, text)
+
+    def test_openapi_no_longer_claims_unimplemented_jobs_endpoint(self) -> None:
+        text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
+        self.assertNotIn("/v1/jobs/{job_id}", text)
 
 
 if __name__ == "__main__":
