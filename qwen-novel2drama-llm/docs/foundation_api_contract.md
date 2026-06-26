@@ -29,7 +29,7 @@ The foundation layer owns:
 - rules contract
 - skills and MCP contract
 - agent run and event stream contract
-- provider adapter contract
+- provider adapter and provider stream contract
 - API key and workspace scope contract
 - auth audit and rate limit contract
 - response envelope and error code contract
@@ -194,7 +194,7 @@ Runtime-aligned endpoints:
 
 The earlier planned `/v1/jobs/{job_id}` endpoint is not in the current runtime and is intentionally not listed as implemented.
 
-## Provider execution controls
+## Provider execution and stream controls
 
 Provider execution is explicit. `/v1/chat`, `/v1/reason`, `/v1/multimodal/analyze` and `/v1/agent/run` can route and estimate cost without calling a provider.
 
@@ -204,6 +204,21 @@ Execution fields:
 - `dry_run_provider`
 - `base_url`
 - `api_key_env`
+
+Stream fields:
+
+- `stream`
+- `stream_chunk_chars`
+- `force_chunked_stream`
+
+`/v1/chat` returns `text/event-stream` when `stream=true` and `execute_provider=true`.
+
+Provider stream event types:
+
+- `provider_stream_started`
+- `provider_stream_delta`
+- `provider_stream_completed`
+- `provider_stream_failed`
 
 The default is route/cost preflight only.
 
@@ -259,9 +274,9 @@ Applications can use these capabilities later through the same routing and API l
 
 ## Next implementation step
 
-After SSE live Agent events v1, continue with:
+After local provider streaming output v1, continue with:
 
-1. local provider streaming output
+1. native OpenAI-compatible streaming
 2. provider usage reconciliation
 3. workspace-level budget and quota checks
 4. CI contract check
