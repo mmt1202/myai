@@ -25,8 +25,10 @@ from mcp.adapter import FoundationMCPAdapter
 from providers.base import ProviderError, response_envelope
 from providers.factory import generate_with_registry
 from services.auth import AuthError, auth_required_from_env, build_auth_context, key_store_path_from_env, load_key_store
+from services.auth_audit import write_auth_event
 from services.cost_estimator import estimate_request_cost, instance_by_id
 from services.memory_store import search_memory, write_memory
+from services.rate_limiter import RateLimitError, check_rate_limit, load_json as load_rate_limit_json, rate_limit_config_path_from_env, rate_limit_enabled_from_env, rate_limit_state_path_from_env
 from services.rule_engine import evaluate_rules, load_rules
 from services.token_counter import estimate_request_usage
 from skills.registry import SkillError, call_skill, list_skills, load_json
@@ -39,6 +41,7 @@ ACTIVE_MODEL_VERSION: str | None = None
 ACTIVE_MODEL_PATH: str | None = None
 MEMORY_STORE_PATH = PROJECT_ROOT / "outputs" / "memory" / "memory.jsonl"
 AGENT_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "agent_runtime" / "api"
+AUTH_AUDIT_PATH = PROJECT_ROOT / "outputs" / "auth" / "auth_audit.jsonl"
 
 
 class GenerateRequest(BaseModel):
@@ -89,11 +92,41 @@ def failed(body: dict[str, Any], code: str, message: str, **kwargs: Any) -> dict
     )
 
 
+def client_host(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
+
+def emit_auth_audit(request: Request, *, decision: str, status_code: int, reason: str | None = None, auth_context: dict[str, Any] | None = None, metadata: dict[str, Any] | None = None) -> None:
+    context = auth_context or getattr(request.state, "auth_context", {}) or {}
+    try:
+        write_auth_event(
+            AUTH_AUDIT_PATH,
+            {
+                "event_type": "api_request",
+                "decision": decision,
+                "key_id": context.get("key_id"),
+                "owner_id": context.get("owner_id"),
+                "workspace_id": context.get("workspace_id"),
+                "required_scope": context.get("required_scope"),
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": status_code,
+                "reason": reason,
+                "client_host": client_host(request),
+                "metadata": metadata or {},
+            },
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
 @app.middleware("http")
 async def foundation_auth_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
     path = request.url.path
     if not path.startswith("/v1/") and path != "/health":
         return await call_next(request)
+    auth_context: dict[str, Any] | None = None
+    rate_limit_result: dict[str, Any] | None = None
     try:
         store = load_key_store(key_store_path_from_env(PROJECT_ROOT))
         auth_context = build_auth_context(
@@ -106,16 +139,49 @@ async def foundation_auth_middleware(request: Request, call_next):  # type: igno
         )
         request.state.auth_context = auth_context
     except AuthError as exc:
+        emit_auth_audit(request, decision="denied", status_code=exc.status_code, reason=exc.code, metadata=exc.to_dict())
         content = response_envelope(
             status="failed",
             output=None,
             error={"code": exc.code, "message": exc.message, "retryable": False, "details": exc.to_dict()},
         )
         return JSONResponse(status_code=exc.status_code, content=content)
+
+    if rate_limit_enabled_from_env() and path.startswith("/v1/") and not auth_context.get("public"):
+        config = load_rate_limit_json(rate_limit_config_path_from_env(PROJECT_ROOT), {"default": {"enabled": True, "limit": 120, "window_seconds": 60}})
+        try:
+            rate_limit_result = check_rate_limit(
+                rate_limit_state_path_from_env(PROJECT_ROOT),
+                config,
+                key_id=str(auth_context.get("key_id") or "anonymous"),
+                required_scope=auth_context.get("required_scope"),
+                workspace_id=auth_context.get("workspace_id"),
+            )
+            request.state.rate_limit = rate_limit_result
+        except RateLimitError as exc:
+            emit_auth_audit(request, decision="rate_limited", status_code=429, reason="rate_limit_exceeded", auth_context=auth_context, metadata=exc.to_dict())
+            content = response_envelope(
+                status="failed",
+                output=None,
+                error={"code": "rate_limit_exceeded", "message": exc.message, "retryable": True, "details": exc.to_dict()},
+            )
+            headers = {
+                "Retry-After": str(exc.retry_after_seconds),
+                "X-RateLimit-Limit": str(exc.limit),
+                "X-RateLimit-Remaining": str(exc.remaining),
+                "X-RateLimit-Reset": str(exc.reset_at),
+            }
+            return JSONResponse(status_code=429, content=content, headers=headers)
+
     response = await call_next(request)
-    key_id = str(getattr(request.state, "auth_context", {}).get("key_id") or "")
+    key_id = str((auth_context or {}).get("key_id") or "")
     if key_id:
         response.headers["X-Foundation-Auth-Key-Id"] = key_id
+    if rate_limit_result:
+        response.headers["X-RateLimit-Limit"] = str(rate_limit_result.get("limit"))
+        response.headers["X-RateLimit-Remaining"] = str(rate_limit_result.get("remaining"))
+        response.headers["X-RateLimit-Reset"] = str(rate_limit_result.get("reset_at"))
+    emit_auth_audit(request, decision="allowed", status_code=response.status_code, auth_context=auth_context, metadata={"rate_limit": rate_limit_result or {}})
     return response
 
 
@@ -131,7 +197,7 @@ def foundation_health() -> dict[str, Any]:
         "service": "myai-foundation",
         "model_version": ACTIVE_MODEL_VERSION,
         "model_path": ACTIVE_MODEL_PATH,
-        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "provider", "auth"],
+        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "provider", "auth", "rate_limit", "audit"],
     }
 
 
