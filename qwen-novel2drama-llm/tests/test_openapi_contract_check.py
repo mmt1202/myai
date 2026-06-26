@@ -49,6 +49,8 @@ class OpenApiContractCheckTests(unittest.TestCase):
                 "    FoundationResponse:\n"
                 "    AgentRunRequest:\n"
                 "    AgentSkillCall:\n"
+                "    AgentEvent:\n"
+                "    AgentEventsResponse:\n"
                 "    execute_provider:\n"
                 "    dry_run_provider:\n"
                 "    skill_calls:\n"
@@ -57,7 +59,8 @@ class OpenApiContractCheckTests(unittest.TestCase):
                 "    allow_model_tool_provider:\n"
                 "    allow_model_tool_write:\n"
                 "    approve_model_tools:\n"
-                "    fail_on_model_tool_error:\n",
+                "    fail_on_model_tool_error:\n"
+                "    disable_events:\n",
                 encoding="utf-8",
             )
             report = check_contract(api_server, openapi)
