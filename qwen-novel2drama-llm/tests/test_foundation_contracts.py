@@ -88,12 +88,18 @@ class FoundationContractsTests(unittest.TestCase):
         text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
         for field in [
             "ProviderStreamEvent:",
+            "ProviderToolCall:",
             "provider_stream_started",
             "provider_stream_delta",
+            "provider_stream_tool_call_delta",
             "provider_stream_completed",
             "provider_stream_failed",
+            "stream_include_usage:",
+            "stream_options:",
             "stream_chunk_chars:",
             "force_chunked_stream:",
+            "tool_calls",
+            "arguments_json",
             "text/event-stream",
         ]:
             self.assertIn(field, text)
