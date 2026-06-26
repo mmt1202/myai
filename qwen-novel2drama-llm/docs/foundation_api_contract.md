@@ -30,6 +30,7 @@ The foundation layer owns:
 - skills and MCP contract
 - agent run contract
 - provider adapter contract
+- API key and workspace scope contract
 - response envelope and error code contract
 
 ## Unified content blocks
@@ -75,6 +76,34 @@ Schema:
 ```text
 configs/schemas/response_envelope_schema.json
 ```
+
+## Auth contract
+
+OpenAPI declares `ApiKeyAuth` using:
+
+```text
+X-API-Key
+```
+
+Workspace binding uses:
+
+```text
+X-Workspace-Id
+```
+
+Auth is disabled by default for local development and can be enabled with:
+
+```text
+FOUNDATION_AUTH_REQUIRED=true
+FOUNDATION_API_KEYS=configs/auth/api_keys.json
+```
+
+Public endpoints:
+
+- `/health`
+- `/v1/health`
+- `/docs`
+- `/openapi.json`
 
 ## Model capabilities and instances
 
@@ -187,10 +216,10 @@ Applications can use these capabilities later through the same routing and API l
 
 ## Next implementation step
 
-After this OpenAPI sync, continue with:
+After auth/API key/workspace scope, continue with:
 
-1. auth/API key/workspace scopes
-2. local provider adapter for the existing local model runtime
-3. model-decided multi-turn tool loop
-4. OpenAPI lint/check tooling
-5. provider usage reconciliation
+1. local provider adapter for the existing local model runtime
+2. model-decided multi-turn tool loop
+3. OpenAPI lint/check tooling
+4. provider usage reconciliation
+5. auth audit log and rate limiting
