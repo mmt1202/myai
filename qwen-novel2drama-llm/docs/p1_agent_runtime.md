@@ -46,8 +46,10 @@ Current runtime supports approval gates from rule decisions and cost thresholds.
 4. route model
 5. estimate usage and cost through router output
 6. evaluate rules
-7. decide final status
-8. write `agent_run_report.json`
+7. apply approval gate when needed
+8. optionally execute provider through provider factory
+9. record estimated or actual usage in a run-local usage ledger
+10. write `agent_run_report.json`
 
 Possible final states:
 
@@ -55,7 +57,34 @@ Possible final states:
 - `waiting_approval`
 - `failed`
 
+## Provider execution
+
+Provider execution is disabled by default.
+
+Without `execute_provider`, the runtime stops after routing and policy checks, records estimated usage, and marks the run completed with a `ready_for_provider` step.
+
+To execute a provider:
+
+```json
+{
+  "execute_provider": true,
+  "dry_run_provider": true,
+  "base_url": "http://localhost:8000/v1",
+  "api_key_env": "MODEL_API_KEY"
+}
+```
+
+`dry_run_provider` is useful for testing provider payload generation without network calls.
+
+When provider execution runs, the runtime writes:
+
+- `provider_response.json`
+- `usage_ledger.jsonl`
+- `agent_run_report.json`
+
 ## CLI
+
+Preflight only:
 
 ```bash
 python agent/runtime.py \
@@ -63,32 +92,45 @@ python agent/runtime.py \
   --output-dir outputs/agent_runtime/demo
 ```
 
+Provider dry-run:
+
+```bash
+python agent/runtime.py \
+  --request examples/agent_request.json \
+  --output-dir outputs/agent_runtime/demo \
+  --execute-provider \
+  --dry-run-provider \
+  --base-url http://localhost:8000/v1
+```
+
 Example request:
 
 ```json
 {
   "task": "summarize this request",
-  "route_mode": "balanced",
-  "approval_policy": "on_cost",
+  "route_mode": "smart",
+  "approval_policy": "never",
+  "execute_provider": true,
+  "dry_run_provider": true,
   "input": [
     {"type": "text", "text": "hello"}
-  ],
-  "privacy": {"local_only": true}
+  ]
 }
 ```
 
 ## Current limitations
 
-- Does not call provider APIs yet.
-- Does not execute tool loops yet.
-- Does not resume from existing run files yet.
-- Does not persist to a database yet.
+- Provider execution currently supports provider factory paths only.
+- Local provider adapter is not implemented yet.
+- Tool loop is not implemented yet.
+- Resume from existing run files is not implemented yet.
+- Database persistence is not implemented yet.
 - Approval resolution is not implemented yet.
 
 ## Next steps
 
-- Add provider adapter base.
-- Add provider execution step.
-- Add tool execution step.
+- Add Agent skill loop.
+- Add local provider adapter for the existing local model runtime.
 - Add resume/cancel/retry CLI commands.
-- Add API server integration for `/v1/agent/run`.
+- Add streaming run events.
+- Add provider usage reconciliation into the global usage ledger.
