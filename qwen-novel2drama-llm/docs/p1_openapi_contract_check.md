@@ -21,9 +21,14 @@ It also checks that important OpenAPI sections and fields are present, including
 - `FoundationResponse`
 - `AgentRunRequest`
 - `AgentSkillCall`
+- `AgentEvent`
+- `AgentEventsResponse`
 - provider execution fields
 - request-driven skill loop fields
 - model tool loop fields
+- Agent event stream fields such as `disable_events` and `text/event-stream`
+
+Current required runtime endpoints include `GET /v1/agent/events`.
 
 ## Run
 
@@ -47,7 +52,7 @@ openapi_contract_check=ok
 
 ## Purpose
 
-The foundation API now includes router, token/cost, memory, rules, skills, MCP, API key mode, provider execution and Agent tool loop controls.
+The foundation API now includes router, token/cost, memory, rules, skills, MCP, API key mode, provider execution, Agent tool loop controls and live Agent event reads.
 
 This check helps keep runtime routes and the static OpenAPI file consistent as the API changes.
 
