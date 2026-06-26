@@ -97,7 +97,7 @@ The legacy `POST /generate` endpoint remains and still requires a loaded local m
 
 By default, provider execution is skipped and the API returns route, usage and cost estimates.
 
-To call a provider adapter, pass:
+To call a provider adapter:
 
 ```json
 {
@@ -106,6 +106,33 @@ To call a provider adapter, pass:
   "api_key_env": "MODEL_API_KEY"
 }
 ```
+
+To stream provider output as SSE:
+
+```json
+{
+  "route_mode": "local_first",
+  "execute_provider": true,
+  "stream": true,
+  "model_path": "/path/to/model",
+  "input": [{"type": "text", "text": "hello"}]
+}
+```
+
+SSE provider frames use:
+
+```text
+id: <chunk_id>
+event: provider_stream_delta
+data: <provider stream event JSON>
+```
+
+Provider stream event types:
+
+- `provider_stream_started`
+- `provider_stream_delta`
+- `provider_stream_completed`
+- `provider_stream_failed`
 
 ## Local provider execution
 
@@ -118,6 +145,19 @@ Local provider dry-run does not load model weights:
   "route_mode": "local_first",
   "execute_provider": true,
   "dry_run_provider": true,
+  "input": [{"type": "text", "text": "hello"}]
+}
+```
+
+Local provider stream dry-run:
+
+```json
+{
+  "route_mode": "local_first",
+  "execute_provider": true,
+  "stream": true,
+  "dry_run_provider": true,
+  "stream_chunk_chars": 32,
   "input": [{"type": "text", "text": "hello"}]
 }
 ```
@@ -136,6 +176,7 @@ or a request field:
   "model_path": "/path/to/model",
   "use_cache": true,
   "serialize_generation": true,
+  "stream": true,
   "input": [{"type": "text", "text": "hello"}]
 }
 ```
@@ -145,6 +186,8 @@ Local provider cache and concurrency controls:
 - `use_cache`: reuse loaded model runtime in the current process.
 - `disable_cache`: request-level opt-out.
 - `serialize_generation`: serialize generation per cached model runtime.
+- `stream_chunk_chars`: chunk size for fallback chunked streaming.
+- `force_chunked_stream`: force full-generation chunk fallback even when native streaming exists.
 - `providers.local_text.cache_stats()`: inspect process-local cache state.
 - `providers.local_text.clear_model_cache()`: clear process-local cache state.
 
@@ -211,8 +254,6 @@ Model-decided tool loop execution:
 }
 ```
 
-Model-decided tool calls must use registered foundation skill ids as tool names. Tool results are appended as `tool_result` content blocks and sent back to the provider in the next round.
-
 Agent events are written to:
 
 ```text
@@ -231,69 +272,11 @@ Stream events as SSE:
 GET /v1/agent/events?run_id=demo-run&stream=true
 ```
 
-Supported event query parameters:
-
-- `run_id`
-- `stream`
-- `since_event_id`
-- `limit`
-- `poll_interval`
-- `max_seconds`
-
-SSE response frames use:
-
-```text
-id: <event_id>
-event: <event_type>
-data: <full event JSON>
-```
-
-Disable event writing per request:
-
-```json
-{
-  "disable_events": true
-}
-```
-
-The agent writes run artifacts under:
-
-```text
-outputs/agent_runtime/api/<request_id-or-run_id-or-latest>/
-```
-
-Artifacts can include:
-
-- `agent_run_report.json`
-- `events.jsonl`
-- `provider_response.json`
-- `skill_results.json`
-- `model_tool_loop.json`
-- `usage_ledger.jsonl`
-
-## Memory
-
-The API uses:
-
-```text
-outputs/memory/memory.jsonl
-```
-
-for the default JSONL memory store.
-
-## MCP
-
-`/v1/mcp/tools` exposes skills as MCP-style tools.
-
-`/v1/mcp/call` calls the MCP adapter with optional permission flags:
-
-- `allow_provider`
-- `allow_write`
-- `approved`
-
 ## Current limitations
 
 - Agent SSE currently polls the JSONL event file.
+- `/v1/chat` provider streaming is SSE only, not WebSocket.
+- OpenAI-compatible adapter does not yet use native remote streaming.
 - Model-decided tool loop is synchronous.
 - Tool names must map to registered foundation skill ids.
 - Local provider is text-only and loads weights in-process.
@@ -301,11 +284,10 @@ for the default JSONL memory store.
 - Auth is API-key based, not full OAuth/OIDC.
 - Rate limit state is file based, not distributed.
 - No database-backed memory or run store yet.
-- WebSocket events are not implemented yet.
 
 ## Next steps
 
-- Add local provider streaming support.
+- Add native OpenAI-compatible streaming.
 - Add workspace-level budget and quota checks.
 - Add distributed rate limiting backend.
 - Add resume/cancel/retry for Agent runs.
