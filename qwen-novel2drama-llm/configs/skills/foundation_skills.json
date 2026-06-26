@@ -1,0 +1,126 @@
+{
+  "registry_name": "foundation_skills_registry_v1",
+  "principle": "Skills are reusable capability units owned by the foundation layer. They can wrap internal services, tools, MCP adapters or provider calls.",
+  "skills": [
+    {
+      "id": "foundation.token_count",
+      "name": "Token Count",
+      "category": "usage",
+      "entrypoint": "services.token_counter:estimate_request_usage",
+      "status": "active",
+      "capabilities": ["token.count"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false},
+      "description": "Estimate request tokens and multimodal billable units."
+    },
+    {
+      "id": "foundation.cost_estimate",
+      "name": "Cost Estimate",
+      "category": "usage",
+      "entrypoint": "services.cost_estimator:estimate_request_cost",
+      "status": "active",
+      "capabilities": ["cost.estimate"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false},
+      "description": "Estimate cost from usage and model instance pricing."
+    },
+    {
+      "id": "foundation.route_model",
+      "name": "Route Model",
+      "category": "routing",
+      "entrypoint": "inference.model_router:route_model",
+      "status": "active",
+      "capabilities": ["model.route"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false},
+      "description": "Select a model instance by capability, modality, privacy, context and route mode."
+    },
+    {
+      "id": "foundation.memory_search",
+      "name": "Memory Search",
+      "category": "memory",
+      "entrypoint": "services.memory_store:search_memory",
+      "status": "active",
+      "capabilities": ["memory.retrieve"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false, "reads_memory": true},
+      "description": "Search scoped foundation memory."
+    },
+    {
+      "id": "foundation.memory_write",
+      "name": "Memory Write",
+      "category": "memory",
+      "entrypoint": "services.memory_store:write_memory",
+      "status": "active",
+      "capabilities": ["memory.write"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": true, "calls_provider": false, "writes_memory": true},
+      "description": "Write a scoped memory item."
+    },
+    {
+      "id": "foundation.rules_evaluate",
+      "name": "Rules Evaluate",
+      "category": "policy",
+      "entrypoint": "services.rule_engine:evaluate_rules",
+      "status": "active",
+      "capabilities": ["rules.evaluate"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false},
+      "description": "Evaluate deterministic allow/review/deny rules."
+    },
+    {
+      "id": "foundation.agent_run",
+      "name": "Agent Run",
+      "category": "agent",
+      "entrypoint": "agent.runtime:run_agent_once",
+      "status": "active",
+      "capabilities": ["agent.run"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": true, "writes_files": true, "calls_provider": false},
+      "description": "Run the foundation agent runtime orchestration flow."
+    },
+    {
+      "id": "foundation.provider_generate",
+      "name": "Provider Generate",
+      "category": "provider",
+      "entrypoint": "providers.factory:generate_with_registry",
+      "status": "active",
+      "capabilities": ["text.chat", "provider.generate"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": true, "writes_files": false, "calls_provider": true},
+      "description": "Generate through provider factory using a registered model instance."
+    },
+    {
+      "id": "drama.story_reasoning",
+      "name": "Drama Story Reasoning",
+      "category": "drama_specialist",
+      "entrypoint": "agent.runtime:run_agent_once",
+      "status": "planned",
+      "capabilities": ["drama.story_reasoning", "text.reason"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": true, "calls_provider": true},
+      "description": "Future specialist skill for AI short drama/comic story reasoning."
+    },
+    {
+      "id": "drama.visual_planning",
+      "name": "Drama Visual Planning",
+      "category": "drama_specialist",
+      "entrypoint": "agent.runtime:run_agent_once",
+      "status": "planned",
+      "capabilities": ["drama.visual_planning", "vision.understand", "image.generate", "video.generate"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": true, "writes_files": true, "calls_provider": true},
+      "description": "Future specialist skill for character, scene, storyboard and visual prompt planning."
+    }
+  ]
+}
