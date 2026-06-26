@@ -12,6 +12,7 @@ from providers.base import ProviderError
 from providers.factory import generate_with_registry
 from services.rule_engine import evaluate_rules, load_rules
 from services.usage_ledger import write_event
+from skills.registry import SkillError, call_skill
 
 RUN_STATES = {"queued", "running", "waiting_tool", "waiting_approval", "completed", "failed", "cancelled"}
 TERMINAL_STATES = {"completed", "failed", "cancelled"}
@@ -62,6 +63,7 @@ def create_run(request: dict[str, Any]) -> dict[str, Any]:
         "steps": [],
         "route_decision": None,
         "rule_decision": None,
+        "skill_results": [],
         "provider_response": None,
         "usage": {},
         "cost": {},
@@ -194,6 +196,59 @@ def record_usage(output_dir: Path, run: dict[str, Any], provider_response: dict[
     )
 
 
+def normalize_skill_call(call: dict[str, Any]) -> dict[str, Any]:
+    name = call.get("name") or call.get("skill_id")
+    if not name:
+        raise SkillError("skill call requires name or skill_id")
+    return {
+        "name": str(name),
+        "arguments": call.get("arguments") or {},
+        "allow_provider": bool(call.get("allow_provider")),
+        "allow_write": bool(call.get("allow_write")),
+        "approved": bool(call.get("approved")),
+        "continue_on_error": bool(call.get("continue_on_error")),
+    }
+
+
+def run_skill_loop(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any]) -> None:
+    calls = request.get("skill_calls") or []
+    if not calls:
+        return
+    registry = load_json(project_root / "configs" / "skills" / "foundation_skills.json")
+    results: list[dict[str, Any]] = []
+    default_allow_provider = bool(request.get("allow_skill_provider"))
+    default_allow_write = bool(request.get("allow_skill_write"))
+    default_approved = bool(request.get("approve_skills"))
+    add_step(run, "skill_loop_start", output_data={"skill_call_count": len(calls)})
+    for raw_call in calls:
+        call = normalize_skill_call(raw_call)
+        allow_provider = default_allow_provider or call["allow_provider"]
+        allow_write = default_allow_write or call["allow_write"]
+        approved = default_approved or call["approved"]
+        try:
+            result = call_skill(
+                registry,
+                call["name"],
+                call["arguments"],
+                allow_provider=allow_provider,
+                allow_write=allow_write,
+                approved=approved,
+            )
+            results.append(result)
+            add_step(run, "skill_call", input_data={"name": call["name"], "permissions": {"allow_provider": allow_provider, "allow_write": allow_write, "approved": approved}}, output_data=result)
+        except Exception as exc:  # noqa: BLE001
+            failure = {"skill_id": call["name"], "status": "failed", "error": str(exc)}
+            results.append(failure)
+            add_step(run, "skill_call", status="failed", input_data={"name": call["name"]}, output_data=failure, error=str(exc))
+            if not call["continue_on_error"]:
+                run["skill_results"] = results
+                save_json(output_dir / "skill_results.json", {"results": results})
+                raise SkillError(str(exc)) from exc
+    run["skill_results"] = results
+    save_json(output_dir / "skill_results.json", {"results": results})
+    add_step(run, "skill_loop_completed", output_data={"skill_result_count": len(results)})
+
+
 def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any]) -> None:
     selected_model_id = route_decision.get("selected_model_id")
     if not selected_model_id:
@@ -254,18 +309,27 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
         add_step(run, "approval_gate", status="waiting_approval", output_data={"reason": "approval_required"})
         record_usage(output_dir, run)
         transition(run, "waiting_approval")
-    elif request.get("execute_provider"):
-        try:
-            run_provider_step(project_root, output_dir, run, request, foundation_request, route_decision, instances)
-            transition(run, "completed")
-        except ProviderError as exc:
-            run["error"] = exc.code
-            add_step(run, "provider_error", status="failed", output_data={"code": exc.code, "message": exc.message, "details": exc.details}, error=exc.message)
-            transition(run, "failed")
     else:
-        add_step(run, "ready_for_provider", output_data={"selected_model_id": route_decision.get("selected_model_id"), "provider_execution": "skipped"})
-        record_usage(output_dir, run)
-        transition(run, "completed")
+        try:
+            run_skill_loop(project_root, output_dir, run, request)
+        except SkillError as exc:
+            run["error"] = "skill_failed"
+            add_step(run, "skill_loop_error", status="failed", output_data={"message": str(exc)}, error=str(exc))
+            record_usage(output_dir, run)
+            transition(run, "failed")
+        else:
+            if request.get("execute_provider"):
+                try:
+                    run_provider_step(project_root, output_dir, run, request, foundation_request, route_decision, instances)
+                    transition(run, "completed")
+                except ProviderError as exc:
+                    run["error"] = exc.code
+                    add_step(run, "provider_error", status="failed", output_data={"code": exc.code, "message": exc.message, "details": exc.details}, error=exc.message)
+                    transition(run, "failed")
+            else:
+                add_step(run, "ready_for_provider", output_data={"selected_model_id": route_decision.get("selected_model_id"), "provider_execution": "skipped"})
+                record_usage(output_dir, run)
+                transition(run, "completed")
 
     run["artifacts"] = {
         "report": str(output_dir / "agent_run_report.json"),
@@ -273,6 +337,8 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
     }
     if run.get("provider_response"):
         run["artifacts"]["provider_response"] = str(output_dir / "provider_response.json")
+    if run.get("skill_results"):
+        run["artifacts"]["skill_results"] = str(output_dir / "skill_results.json")
     save_json(output_dir / "agent_run_report.json", run)
     return run
 
@@ -288,6 +354,9 @@ def main() -> int:
     parser.add_argument("--dry-run-provider", action="store_true")
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--api-key-env", default="MODEL_API_KEY")
+    parser.add_argument("--allow-skill-provider", action="store_true")
+    parser.add_argument("--allow-skill-write", action="store_true")
+    parser.add_argument("--approve-skills", action="store_true")
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
     request = load_json(Path(args.request))
@@ -299,6 +368,12 @@ def main() -> int:
         request["base_url"] = args.base_url
     if args.api_key_env:
         request["api_key_env"] = args.api_key_env
+    if args.allow_skill_provider:
+        request["allow_skill_provider"] = True
+    if args.allow_skill_write:
+        request["allow_skill_write"] = True
+    if args.approve_skills:
+        request["approve_skills"] = True
     run = run_agent_once(
         project_root=project_root,
         request=request,
