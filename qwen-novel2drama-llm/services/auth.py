@@ -19,6 +19,7 @@ PATH_SCOPE_RULES = [
     ("POST", "/v1/memory/write", "memory:write"),
     ("POST", "/v1/rules/evaluate", "rules:evaluate"),
     ("POST", "/v1/agent/run", "agent:run"),
+    ("GET", "/v1/agent/events", "agent:run"),
     ("POST", "/v1/chat", "model:invoke"),
     ("POST", "/v1/reason", "model:invoke"),
     ("POST", "/v1/multimodal/analyze", "model:invoke"),
