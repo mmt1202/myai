@@ -121,9 +121,9 @@ or a request field:
 }
 ```
 
-## Agent provider execution and skill loop
+## Agent provider execution and tool loops
 
-`/v1/agent/run` supports provider execution and registered skill calls through `agent/runtime.py`.
+`/v1/agent/run` supports provider execution, request-defined skill calls, and model-decided tool calls through `agent/runtime.py`.
 
 Provider preflight only:
 
@@ -148,7 +148,7 @@ Provider dry-run execution:
 }
 ```
 
-Skill loop execution:
+Request-driven skill loop execution:
 
 ```json
 {
@@ -167,11 +167,35 @@ Skill loop execution:
 }
 ```
 
-Skill permission flags can be supplied per skill call or as request-level defaults:
+Model-decided tool loop execution:
+
+```json
+{
+  "task": "use tools if needed",
+  "route_mode": "smart",
+  "approval_policy": "never",
+  "execute_provider": true,
+  "enable_model_tool_loop": true,
+  "max_tool_rounds": 3,
+  "allow_model_tool_write": false,
+  "approve_model_tools": false
+}
+```
+
+Model-decided tool calls must use registered foundation skill ids as tool names. Tool results are appended as `tool_result` content blocks and sent back to the provider in the next round.
+
+Skill permission flags can be supplied per request-driven skill call or as request-level defaults:
 
 - `allow_skill_provider`
 - `allow_skill_write`
 - `approve_skills`
+
+Model tool-loop permission flags:
+
+- `allow_model_tool_provider`
+- `allow_model_tool_write`
+- `approve_model_tools`
+- `fail_on_model_tool_error`
 
 The agent writes run artifacts under:
 
@@ -184,6 +208,7 @@ Artifacts can include:
 - `agent_run_report.json`
 - `provider_response.json`
 - `skill_results.json`
+- `model_tool_loop.json`
 - `usage_ledger.jsonl`
 
 ## Memory
@@ -208,7 +233,8 @@ for the default JSONL memory store.
 
 ## Current limitations
 
-- Agent skill loop is synchronous and request-driven, not model-decided multi-turn tool calling yet.
+- Model-decided tool loop is synchronous.
+- Tool names must map to registered foundation skill ids.
 - Local provider is text-only and loads weights in-process.
 - No streaming API yet.
 - Auth is API-key based, not full OAuth/OIDC.
@@ -217,7 +243,6 @@ for the default JSONL memory store.
 
 ## Next steps
 
-- Add model-decided Agent tool loop.
 - Add local provider concurrency controls.
 - Add auth audit log and rate limiting.
 - Add workspace-level budget and quota checks.
