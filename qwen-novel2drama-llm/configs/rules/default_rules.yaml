@@ -1,0 +1,101 @@
+ruleset_name: foundation_default_rules_v1
+principle: >
+  Foundation rules are deterministic controls for model routing, budget,
+  provider access, memory access, tool access and approval gates. They should
+  not be hidden inside prompts.
+
+default_decision: allow
+
+rules:
+  - id: local_only_blocks_external_provider
+    description: Requests with privacy.local_only cannot use external providers.
+    priority: 100
+    effect: deny
+    when:
+      all:
+        - field: request.privacy.local_only
+          op: equals
+          value: true
+        - field: candidate.provider
+          op: not_equals
+          value: local
+    reason: privacy_boundary
+
+  - id: budget_limit
+    description: Reject a candidate when estimated cost exceeds request budget.
+    priority: 90
+    effect: deny
+    when:
+      all:
+        - field: request.budget.max_estimated_cost
+          op: exists
+        - field: candidate.estimated_cost.estimated
+          op: greater_than
+          value_from: request.budget.max_estimated_cost
+    reason: budget_exceeded
+
+  - id: external_model_requires_approval_for_secret
+    description: Secret data sent to external providers requires review.
+    priority: 80
+    effect: review
+    when:
+      all:
+        - field: request.max_sensitivity
+          op: equals
+          value: secret
+        - field: candidate.provider
+          op: not_equals
+          value: local
+    reason: external_secret_review
+
+  - id: tool_apply_requires_approval
+    description: Source-changing tools require approval.
+    priority: 80
+    effect: review
+    when:
+      all:
+        - field: tool.write_files
+          op: equals
+          value: true
+        - field: tool.requires_confirmation
+          op: equals
+          value: true
+    reason: tool_write_review
+
+  - id: memory_secret_requires_owner_scope
+    description: Secret memory requires owner_id in the request context.
+    priority: 70
+    effect: deny
+    when:
+      all:
+        - field: memory.sensitivity
+          op: equals
+          value: secret
+        - field: request.owner_id
+          op: missing
+    reason: memory_owner_required
+
+  - id: deprecated_models_require_review
+    description: Deprecated models should not be used silently.
+    priority: 60
+    effect: review
+    when:
+      all:
+        - field: candidate.lifecycle
+          op: equals
+          value: deprecated
+    reason: deprecated_model_review
+
+  - id: drama_specialist_prefers_reasoning
+    description: Drama specialist tasks should use reasoning-capable models.
+    priority: 50
+    effect: review
+    when:
+      all:
+        - field: request.route_mode
+          op: equals
+          value: drama_specialist
+        - field: candidate.capabilities
+          op: not_contains
+          value: text.reason
+    reason: drama_reasoning_missing
