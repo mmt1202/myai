@@ -120,7 +120,7 @@ To stream provider output as SSE:
 }
 ```
 
-For OpenAI-compatible providers, the adapter sends native `stream=true` to `/chat/completions`, parses provider SSE `data: {...}` lines, stops on `data: [DONE]`, and converts deltas into foundation `ProviderStreamEvent` chunks.
+For OpenAI-compatible providers, the adapter sends native `stream=true` to `/chat/completions`, parses provider SSE `data: {...}` lines, stops on `data: [DONE]`, and converts text/tool-call deltas into foundation `ProviderStreamEvent` chunks.
 
 To ask compatible providers for final stream usage when they support it:
 
@@ -143,8 +143,17 @@ Provider stream event types:
 
 - `provider_stream_started`
 - `provider_stream_delta`
+- `provider_stream_tool_call_delta`
 - `provider_stream_completed`
 - `provider_stream_failed`
+
+When the remote stream contains `delta.tool_calls`, the provider adapter reconstructs complete tool calls by `index` and returns them in:
+
+```text
+provider_stream_completed.output.tool_calls
+```
+
+The adapter does not execute reconstructed tool calls by itself.
 
 ## Local provider execution
 
@@ -288,7 +297,7 @@ GET /v1/agent/events?run_id=demo-run&stream=true
 
 - Agent SSE currently polls the JSONL event file.
 - `/v1/chat` provider streaming is SSE only, not WebSocket.
-- OpenAI-compatible streaming currently handles text deltas; streamed tool-call delta reconstruction is not implemented yet.
+- Reconstructed streamed tool calls are not yet bridged into Agent tool-loop execution.
 - Model-decided tool loop is synchronous.
 - Tool names must map to registered foundation skill ids.
 - Local provider is text-only and loads weights in-process.
@@ -299,7 +308,7 @@ GET /v1/agent/events?run_id=demo-run&stream=true
 
 ## Next steps
 
-- Add streamed tool-call delta reconstruction.
+- Bridge streamed provider tool calls into Agent tool loop execution.
 - Add workspace-level budget and quota checks.
 - Add distributed rate limiting backend.
 - Add resume/cancel/retry for Agent runs.
