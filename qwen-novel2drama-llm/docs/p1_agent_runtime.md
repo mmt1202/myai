@@ -47,9 +47,10 @@ Current runtime supports approval gates from rule decisions and cost thresholds.
 5. estimate usage and cost through router output
 6. evaluate rules
 7. apply approval gate when needed
-8. optionally execute provider through provider factory
-9. record estimated or actual usage in a run-local usage ledger
-10. write `agent_run_report.json`
+8. optionally execute registered skills
+9. optionally execute provider through provider factory
+10. record estimated or actual usage in a run-local usage ledger
+11. write `agent_run_report.json`
 
 Possible final states:
 
@@ -57,11 +58,51 @@ Possible final states:
 - `waiting_approval`
 - `failed`
 
+## Skill loop
+
+The runtime accepts `skill_calls` in the request.
+
+Example:
+
+```json
+{
+  "skill_calls": [
+    {
+      "name": "foundation.token_count",
+      "arguments": {
+        "request": {"input": [{"type": "text", "text": "hello"}]},
+        "expected_output_tokens": 10
+      }
+    }
+  ]
+}
+```
+
+Each skill call supports optional per-call permission flags:
+
+- `allow_provider`
+- `allow_write`
+- `approved`
+- `continue_on_error`
+
+The run request also supports default skill permissions:
+
+- `allow_skill_provider`
+- `allow_skill_write`
+- `approve_skills`
+
+When the skill loop runs, the runtime writes:
+
+- `skill_results.json`
+- `agent_run_report.json`
+
+A denied or failing skill fails the run unless `continue_on_error` is true for that skill call.
+
 ## Provider execution
 
 Provider execution is disabled by default.
 
-Without `execute_provider`, the runtime stops after routing and policy checks, records estimated usage, and marks the run completed with a `ready_for_provider` step.
+Without `execute_provider`, the runtime stops after routing, policy checks and optional skill calls, records estimated usage, and marks the run completed with a `ready_for_provider` step.
 
 To execute a provider:
 
@@ -103,6 +144,15 @@ python agent/runtime.py \
   --base-url http://localhost:8000/v1
 ```
 
+Skill permissions can also be passed through CLI:
+
+```bash
+python agent/runtime.py \
+  --request examples/agent_request.json \
+  --allow-skill-write \
+  --approve-skills
+```
+
 Example request:
 
 ```json
@@ -112,6 +162,15 @@ Example request:
   "approval_policy": "never",
   "execute_provider": true,
   "dry_run_provider": true,
+  "skill_calls": [
+    {
+      "name": "foundation.token_count",
+      "arguments": {
+        "request": {"input": [{"type": "text", "text": "hello"}]},
+        "expected_output_tokens": 10
+      }
+    }
+  ],
   "input": [
     {"type": "text", "text": "hello"}
   ]
@@ -122,15 +181,15 @@ Example request:
 
 - Provider execution currently supports provider factory paths only.
 - Local provider adapter is not implemented yet.
-- Tool loop is not implemented yet.
+- Tool loop is synchronous and skill-call based; model-decided multi-turn tool calling is not implemented yet.
 - Resume from existing run files is not implemented yet.
 - Database persistence is not implemented yet.
 - Approval resolution is not implemented yet.
 
 ## Next steps
 
-- Add Agent skill loop.
 - Add local provider adapter for the existing local model runtime.
+- Add model-decided tool loop.
 - Add resume/cancel/retry CLI commands.
 - Add streaming run events.
 - Add provider usage reconciliation into the global usage ledger.
