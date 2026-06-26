@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+import json
+import uuid
+from abc import ABC, abstractmethod
+from datetime import datetime, timezone
+from typing import Any
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def request_id() -> str:
+    return f"req_{uuid.uuid4().hex}"
+
+
+class ProviderError(RuntimeError):
+    def __init__(self, code: str, message: str, *, retryable: bool = False, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.details = details or {}
+
+    def to_error(self, trace_id: str | None = None, request_id_value: str | None = None) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "retryable": self.retryable,
+            "details": self.details,
+            "trace_id": trace_id,
+            "request_id": request_id_value,
+        }
+
+
+def text_from_content_blocks(blocks: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for block in blocks:
+        block_type = block.get("type")
+        if block_type in {"text", "subtitle", "reasoning_hint", "tool_result"}:
+            parts.append(str(block.get("text") or ""))
+        elif block_type == "metadata":
+            parts.append(json.dumps(block.get("metadata") or {}, ensure_ascii=False))
+        elif block_type in {"image", "video", "audio", "file", "url"}:
+            parts.append(f"[{block_type}: {block.get('uri') or block.get('file_id') or block.get('filename') or 'inline'}]")
+    return "\n".join(part for part in parts if part)
+
+
+def output_text_block(text: str) -> dict[str, Any]:
+    return {"type": "text", "text": text}
+
+
+def response_envelope(
+    *,
+    status: str,
+    output: Any = None,
+    request_id_value: str | None = None,
+    trace_id: str | None = None,
+    model: dict[str, Any] | None = None,
+    usage: dict[str, Any] | None = None,
+    cost: dict[str, Any] | None = None,
+    route: dict[str, Any] | None = None,
+    warnings: list[str] | None = None,
+    error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "request_id": request_id_value or request_id(),
+        "trace_id": trace_id,
+        "status": status,
+        "model": model or {},
+        "usage": usage or {},
+        "cost": cost or {},
+        "output": output,
+        "warnings": warnings or [],
+        "error": error,
+        "route": route or {},
+        "created_at": now_iso(),
+    }
+
+
+def normalize_usage(raw_usage: dict[str, Any] | None) -> dict[str, Any]:
+    raw = raw_usage or {}
+    input_tokens = int(raw.get("prompt_tokens") or raw.get("input_tokens") or 0)
+    output_tokens = int(raw.get("completion_tokens") or raw.get("output_tokens") or 0)
+    reasoning_tokens = int(raw.get("reasoning_tokens") or 0)
+    total_tokens = int(raw.get("total_tokens") or input_tokens + output_tokens + reasoning_tokens)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "reasoning_tokens": reasoning_tokens,
+        "cached_input_tokens": int(raw.get("cached_input_tokens") or 0),
+        "total_tokens": total_tokens,
+    }
+
+
+class BaseProvider(ABC):
+    provider_name = "base"
+
+    def __init__(self, model_instance: dict[str, Any] | None = None) -> None:
+        self.model_instance = model_instance or {}
+
+    def model_id(self) -> str:
+        return str(self.model_instance.get("id") or self.model_instance.get("model_name") or "unknown")
+
+    def provider_model(self) -> str:
+        return str(self.model_instance.get("model_name") or self.model_id())
+
+    def health(self) -> dict[str, Any]:
+        return {"provider": self.provider_name, "model_id": self.model_id(), "status": "configured" if self.model_instance else "unconfigured"}
+
+    def supports_capability(self, capability: str) -> bool:
+        return capability in set(self.model_instance.get("capabilities") or [])
+
+    def supports_modalities(self, input_modalities: set[str], output_modality: str | None = None) -> bool:
+        inputs = set(self.model_instance.get("input_modalities") or [])
+        outputs = set(self.model_instance.get("output_modalities") or [])
+        if not input_modalities.issubset(inputs):
+            return False
+        if output_modality and output_modality not in outputs:
+            return False
+        return True
+
+    @abstractmethod
+    def generate(self, request: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
