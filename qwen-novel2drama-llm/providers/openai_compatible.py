@@ -135,12 +135,73 @@ class OpenAICompatibleProvider(BaseProvider):
             return str(content)
         return ""
 
+    def stream_tool_call_deltas_from_chunk(self, data: dict[str, Any]) -> list[dict[str, Any]]:
+        choices = data.get("choices") or []
+        if not choices:
+            return []
+        delta = choices[0].get("delta") or {}
+        tool_calls = delta.get("tool_calls") or []
+        return [item for item in tool_calls if isinstance(item, dict)]
+
     def stream_finish_reason(self, data: dict[str, Any]) -> str | None:
         choices = data.get("choices") or []
         if not choices:
             return None
         value = choices[0].get("finish_reason")
         return str(value) if value else None
+
+    def tool_call_index(self, item: dict[str, Any], buffer: dict[int, dict[str, Any]]) -> int:
+        value = item.get("index")
+        if value is None:
+            return len(buffer)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return len(buffer)
+
+    def update_tool_call_buffer(self, buffer: dict[int, dict[str, Any]], item: dict[str, Any]) -> dict[str, Any]:
+        index = self.tool_call_index(item, buffer)
+        entry = buffer.setdefault(index, {"index": index, "id": None, "type": "function", "function": {"name": "", "arguments": ""}})
+        if item.get("id"):
+            entry["id"] = str(item["id"])
+        if item.get("type"):
+            entry["type"] = str(item["type"])
+        function_delta = item.get("function") or {}
+        if isinstance(function_delta, dict):
+            if function_delta.get("name") is not None:
+                entry["function"]["name"] = str(entry["function"].get("name") or "") + str(function_delta.get("name") or "")
+            if function_delta.get("arguments") is not None:
+                entry["function"]["arguments"] = str(entry["function"].get("arguments") or "") + str(function_delta.get("arguments") or "")
+        return entry
+
+    def decoded_arguments(self, arguments: str) -> Any:
+        if not arguments:
+            return None
+        try:
+            return json.loads(arguments)
+        except json.JSONDecodeError:
+            return None
+
+    def reconstructed_tool_calls(self, buffer: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+        tool_calls: list[dict[str, Any]] = []
+        for index in sorted(buffer):
+            item = buffer[index]
+            function = item.get("function") or {}
+            arguments = str(function.get("arguments") or "")
+            tool_call = {
+                "index": index,
+                "id": item.get("id") or f"tool_call_{index}",
+                "type": item.get("type") or "function",
+                "function": {
+                    "name": str(function.get("name") or ""),
+                    "arguments": arguments,
+                },
+            }
+            arguments_json = self.decoded_arguments(arguments)
+            if arguments_json is not None:
+                tool_call["arguments_json"] = arguments_json
+            tool_calls.append(tool_call)
+        return tool_calls
 
     def stream_generate(self, request: dict[str, Any]) -> Iterator[dict[str, Any]]:
         stream_request = {**request, "stream": True}
@@ -177,6 +238,7 @@ class OpenAICompatibleProvider(BaseProvider):
             return
         http_request = self.build_http_request(payload)
         collected: list[str] = []
+        tool_call_buffer: dict[int, dict[str, Any]] = {}
         usage: dict[str, Any] = {}
         finish_reason: str | None = None
         try:
@@ -187,6 +249,21 @@ class OpenAICompatibleProvider(BaseProvider):
                     reason = self.stream_finish_reason(data)
                     if reason:
                         finish_reason = reason
+                    for tool_call_delta in self.stream_tool_call_deltas_from_chunk(data):
+                        entry = self.update_tool_call_buffer(tool_call_buffer, tool_call_delta)
+                        yield provider_stream_event(
+                            "provider_stream_tool_call_delta",
+                            request_id_value=request_id_value,
+                            trace_id=trace_id,
+                            model={**model_info, "provider_model": data.get("model") or model_info["provider_model"]},
+                            index=int(entry.get("index") or 0),
+                            metadata={
+                                "raw_chunk_id": data.get("id"),
+                                "finish_reason": reason,
+                                "tool_call_delta": tool_call_delta,
+                                "tool_call_partial": entry,
+                            },
+                        )
                     delta = self.stream_delta_from_chunk(data)
                     if not delta:
                         continue
@@ -206,15 +283,19 @@ class OpenAICompatibleProvider(BaseProvider):
         except urllib.error.URLError as exc:
             raise ProviderError("provider_unavailable", str(exc), retryable=True) from exc
         text = "".join(collected)
+        tool_calls = self.reconstructed_tool_calls(tool_call_buffer)
+        output: dict[str, Any] = {"content": [output_text_block(text)], "finish_reason": finish_reason}
+        if tool_calls:
+            output["tool_calls"] = tool_calls
         yield provider_stream_event(
             "provider_stream_completed",
             request_id_value=request_id_value,
             trace_id=trace_id,
             model=model_info,
-            output={"content": [output_text_block(text)], "finish_reason": finish_reason},
+            output=output,
             usage=usage,
             done=True,
-            metadata={"native_stream": True},
+            metadata={"native_stream": True, "tool_call_count": len(tool_calls)},
         )
 
 
