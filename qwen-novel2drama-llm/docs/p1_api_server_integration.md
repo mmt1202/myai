@@ -69,9 +69,9 @@ To call a provider adapter, pass:
 
 This keeps routing and cost preflight safe by default.
 
-## Agent provider execution
+## Agent provider execution and skill loop
 
-`/v1/agent/run` now supports the same provider execution controls through `agent/runtime.py`.
+`/v1/agent/run` supports provider execution and registered skill calls through `agent/runtime.py`.
 
 Provider preflight only:
 
@@ -96,6 +96,31 @@ Provider dry-run execution:
 }
 ```
 
+Skill loop execution:
+
+```json
+{
+  "task": "count tokens before running",
+  "route_mode": "balanced",
+  "approval_policy": "never",
+  "skill_calls": [
+    {
+      "name": "foundation.token_count",
+      "arguments": {
+        "request": {"input": [{"type": "text", "text": "hello"}]},
+        "expected_output_tokens": 10
+      }
+    }
+  ]
+}
+```
+
+Skill permission flags can be supplied per skill call or as request-level defaults:
+
+- `allow_skill_provider`
+- `allow_skill_write`
+- `approve_skills`
+
 The agent writes run artifacts under:
 
 ```text
@@ -106,6 +131,7 @@ Artifacts can include:
 
 - `agent_run_report.json`
 - `provider_response.json`
+- `skill_results.json`
 - `usage_ledger.jsonl`
 
 ## Memory
@@ -131,7 +157,7 @@ for the default JSONL memory store.
 ## Current limitations
 
 - Static OpenAPI contract still needs to be synchronized with the new helper routes.
-- Agent skill loop is not implemented yet.
+- Agent skill loop is synchronous and request-driven, not model-decided multi-turn tool calling yet.
 - Local provider adapter is not implemented yet.
 - No streaming API yet.
 - No authentication layer yet.
@@ -139,8 +165,8 @@ for the default JSONL memory store.
 
 ## Next steps
 
-- Add Agent skill loop.
 - Add local provider adapter for the existing local runtime.
+- Add model-decided Agent tool loop.
 - Update static OpenAPI contract with all runtime helper routes.
 - Add authentication, workspace and API key scopes.
 - Add streaming events.
