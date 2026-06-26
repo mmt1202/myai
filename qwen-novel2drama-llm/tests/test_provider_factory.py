@@ -8,6 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from providers.factory import build_provider, find_model_instance, generate_with_registry
+from providers.local_text import LocalTextProvider
 from providers.openai_compatible import OpenAICompatibleProvider
 
 
@@ -21,11 +22,22 @@ class ProviderFactoryTests(unittest.TestCase):
         provider = build_provider({"id": "m1", "provider": "openai_compatible", "runtime": "http_chat_completions", "model_name": "demo"})
         self.assertIsInstance(provider, OpenAICompatibleProvider)
 
+    def test_build_local_provider(self) -> None:
+        provider = build_provider({"id": "local1", "provider": "local", "runtime": "transformers", "model_name": "demo"}, model_path="/tmp/demo-model")
+        self.assertIsInstance(provider, LocalTextProvider)
+
     def test_generate_with_registry_dry_run(self) -> None:
         registry = {"instances": [{"id": "m1", "aliases": [], "provider": "openai_compatible", "runtime": "http_chat_completions", "model_name": "demo"}]}
         result = generate_with_registry({"model_id": "m1", "dry_run": True, "input": [{"type": "text", "text": "hello"}]}, registry, base_url="http://example.test/v1")
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["output"]["dry_run"])
+
+    def test_generate_with_local_provider_dry_run(self) -> None:
+        registry = {"instances": [{"id": "local1", "aliases": ["local"], "provider": "local", "runtime": "transformers", "model_name": "demo"}]}
+        result = generate_with_registry({"model_id": "local1", "dry_run": True, "input": [{"type": "text", "text": "hello"}], "model_path": "/tmp/demo-model"}, registry)
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["output"]["dry_run"])
+        self.assertEqual(result["model"]["provider"], "local")
 
 
 if __name__ == "__main__":
