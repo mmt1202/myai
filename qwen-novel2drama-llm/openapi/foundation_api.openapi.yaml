@@ -120,6 +120,24 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRunRequest'}}}}
       responses:
         '200': {description: Agent run response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
+  /v1/agent/events:
+    get:
+      summary: Read or stream Agent run events
+      operationId: getAgentEvents
+      parameters:
+        - {in: query, name: run_id, required: false, schema: {type: string, default: latest}}
+        - {in: query, name: stream, required: false, schema: {type: boolean, default: false}}
+        - {in: query, name: since_event_id, required: false, schema: {type: string}}
+        - {in: query, name: limit, required: false, schema: {type: integer, default: 200}}
+        - {in: query, name: poll_interval, required: false, schema: {type: number, default: 1.0}}
+        - {in: query, name: max_seconds, required: false, schema: {type: integer, default: 60}}
+      responses:
+        '200':
+          description: Agent events JSON response or text/event-stream when stream=true
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}
+            text/event-stream:
+              schema: {type: string}
 components:
   securitySchemes:
     ApiKeyAuth:
@@ -283,12 +301,43 @@ components:
         allow_model_tool_write: {type: boolean, default: false}
         approve_model_tools: {type: boolean, default: false}
         fail_on_model_tool_error: {type: boolean, default: true}
+        disable_events: {type: boolean, default: false}
         base_url: {type: string}
         api_key_env: {type: string, default: MODEL_API_KEY}
+        model_path: {type: string}
+        adapter_path: {type: string}
+        use_cache: {type: boolean, default: true}
+        disable_cache: {type: boolean, default: false}
+        serialize_generation: {type: boolean, default: true}
         skill_calls: {type: array, items: {$ref: '#/components/schemas/AgentSkillCall'}}
         allow_skill_provider: {type: boolean, default: false}
         allow_skill_write: {type: boolean, default: false}
         approve_skills: {type: boolean, default: false}
         budget: {type: object, additionalProperties: true}
         privacy: {type: object, additionalProperties: true}
+      additionalProperties: true
+    AgentEvent:
+      type: object
+      properties:
+        event_id: {type: string}
+        created_at: {type: string}
+        run_id: {type: string}
+        session_id: {type: [string, 'null']}
+        owner_id: {type: [string, 'null']}
+        project_id: {type: [string, 'null']}
+        event_type: {type: string}
+        status: {type: [string, 'null']}
+        step_id: {type: [string, 'null']}
+        step_type: {type: [string, 'null']}
+        message: {type: [string, 'null']}
+        data: {type: object, additionalProperties: true}
+        error: {type: [string, 'null']}
+      additionalProperties: true
+    AgentEventsResponse:
+      type: object
+      properties:
+        run_id: {type: string}
+        events: {type: array, items: {$ref: '#/components/schemas/AgentEvent'}}
+        summary: {type: object, additionalProperties: true}
+        events_path: {type: string}
       additionalProperties: true
