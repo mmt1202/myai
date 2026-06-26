@@ -23,7 +23,7 @@ python inference/api_server.py --skip-model-load
 
 The second mode is useful for routing, token/cost, memory, rules, skills, MCP and agent API testing.
 
-## Auth mode
+## Auth, audit and rate limit mode
 
 Auth is disabled by default for local development.
 
@@ -43,6 +43,30 @@ X-Workspace-Id: your_workspace_id
 ```
 
 `/health`, `/v1/health`, `/docs` and `/openapi.json` remain public.
+
+Auth audit events are written to:
+
+```text
+outputs/auth/auth_audit.jsonl
+```
+
+Enable rate limiting:
+
+```bash
+FOUNDATION_RATE_LIMIT_ENABLED=true \
+FOUNDATION_RATE_LIMITS=configs/auth/rate_limits.json \
+FOUNDATION_RATE_LIMIT_STATE=outputs/auth/rate_limit_state.json \
+python inference/api_server.py --skip-model-load
+```
+
+Rate-limited responses return HTTP `429` with:
+
+```text
+Retry-After
+X-RateLimit-Limit
+X-RateLimit-Remaining
+X-RateLimit-Reset
+```
 
 ## Legacy endpoint
 
@@ -238,12 +262,12 @@ for the default JSONL memory store.
 - Local provider is text-only and loads weights in-process.
 - No streaming API yet.
 - Auth is API-key based, not full OAuth/OIDC.
-- No rate limiting yet.
+- Rate limit state is file based, not distributed.
 - No database-backed memory or run store yet.
 
 ## Next steps
 
 - Add local provider concurrency controls.
-- Add auth audit log and rate limiting.
 - Add workspace-level budget and quota checks.
+- Add distributed rate limiting backend.
 - Add streaming events.
