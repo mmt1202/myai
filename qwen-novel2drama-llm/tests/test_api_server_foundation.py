@@ -11,6 +11,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "inference"))
 
 import inference.api_server as api_server
 from agent.events import write_agent_event
+from fastapi.responses import StreamingResponse
 
 
 class FoundationApiServerTests(unittest.TestCase):
@@ -19,6 +20,7 @@ class FoundationApiServerTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertIn("router", result["capabilities"])
         self.assertIn("agent_events", result["capabilities"])
+        self.assertIn("provider_stream", result["capabilities"])
 
     def test_token_count_api(self) -> None:
         result = api_server.token_count_api({"request_id": "r1", "input": [{"type": "text", "text": "hello"}], "expected_output_tokens": 10})
@@ -61,6 +63,17 @@ class FoundationApiServerTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["output"]["provider_execution"], "skipped")
         self.assertIn("provider_execution_skipped", result["warnings"])
+
+    def test_chat_api_streaming_provider_response(self) -> None:
+        result = api_server.chat_api({"request_id": "stream1", "route_mode": "local_first", "execute_provider": True, "stream": True, "dry_run_provider": True, "model_path": "/tmp/demo", "input": [{"type": "text", "text": "hello"}]})
+        self.assertIsInstance(result, StreamingResponse)
+        self.assertEqual(result.media_type, "text/event-stream")
+
+    def test_provider_sse_event_format(self) -> None:
+        payload = api_server.provider_sse_event({"chunk_id": "c1", "event_type": "provider_stream_delta", "delta": "hi"})
+        self.assertIn("id: c1", payload)
+        self.assertIn("event: provider_stream_delta", payload)
+        self.assertIn("data:", payload)
 
     def test_agent_output_dir_uses_request_or_run_id(self) -> None:
         self.assertEqual(api_server.agent_output_dir_for({"request_id": "r1"}).name, "r1")
