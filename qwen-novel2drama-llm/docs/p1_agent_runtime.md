@@ -115,7 +115,9 @@ To execute a provider:
 }
 ```
 
-`dry_run_provider` is useful for testing provider payload generation without network calls.
+`dry_run_provider` is useful for testing provider payload generation without network calls or local model loading.
+
+Local provider execution is now supported through `providers/local_text.py`. Real local execution requires `model_path` in the request or `FOUNDATION_LOCAL_MODEL_PATH`.
 
 When provider execution runs, the runtime writes:
 
@@ -142,6 +144,15 @@ python agent/runtime.py \
   --execute-provider \
   --dry-run-provider \
   --base-url http://localhost:8000/v1
+```
+
+Local provider real execution:
+
+```bash
+FOUNDATION_LOCAL_MODEL_PATH=/path/to/model python agent/runtime.py \
+  --request examples/agent_request.json \
+  --output-dir outputs/agent_runtime/demo \
+  --execute-provider
 ```
 
 Skill permissions can also be passed through CLI:
@@ -179,17 +190,17 @@ Example request:
 
 ## Current limitations
 
-- Provider execution currently supports provider factory paths only.
-- Local provider adapter is not implemented yet.
+- Local provider is text-only and loads model weights in-process.
 - Tool loop is synchronous and skill-call based; model-decided multi-turn tool calling is not implemented yet.
 - Resume from existing run files is not implemented yet.
 - Database persistence is not implemented yet.
 - Approval resolution is not implemented yet.
+- Streaming run events are not implemented yet.
 
 ## Next steps
 
-- Add local provider adapter for the existing local model runtime.
 - Add model-decided tool loop.
+- Add local provider concurrency and cache controls.
 - Add resume/cancel/retry CLI commands.
 - Add streaming run events.
 - Add provider usage reconciliation into the global usage ledger.
