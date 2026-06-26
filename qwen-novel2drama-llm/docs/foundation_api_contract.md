@@ -184,9 +184,11 @@ Execution fields:
 
 The default is route/cost preflight only.
 
-## Agent skill loop controls
+## Agent tool loop controls
 
-`/v1/agent/run` supports request-driven skill calls through `skill_calls`.
+`/v1/agent/run` supports both request-driven skill calls and model-decided tool calls.
+
+Request-driven skill calls use `skill_calls`.
 
 Skill permission fields:
 
@@ -195,13 +197,22 @@ Skill permission fields:
 - `approved`
 - `continue_on_error`
 
-Request-level defaults:
+Request-level skill defaults:
 
 - `allow_skill_provider`
 - `allow_skill_write`
 - `approve_skills`
 
-This is not yet model-decided multi-turn tool calling.
+Model-decided tool loop fields:
+
+- `enable_model_tool_loop`
+- `max_tool_rounds`
+- `allow_model_tool_provider`
+- `allow_model_tool_write`
+- `approve_model_tools`
+- `fail_on_model_tool_error`
+
+Model-decided tool calls must use registered foundation skill ids as tool names. Tool outputs are appended as `tool_result` content blocks and passed back to the provider for the next round.
 
 ## Short drama/comic specialty
 
@@ -216,10 +227,10 @@ Applications can use these capabilities later through the same routing and API l
 
 ## Next implementation step
 
-After auth/API key/workspace scope, continue with:
+After model-decided tool loop v1, continue with:
 
-1. local provider adapter for the existing local model runtime
-2. model-decided multi-turn tool loop
-3. OpenAPI lint/check tooling
-4. provider usage reconciliation
-5. auth audit log and rate limiting
+1. local provider concurrency and cache controls
+2. OpenAPI lint/check tooling
+3. provider usage reconciliation
+4. auth audit log and rate limiting
+5. streaming run events
