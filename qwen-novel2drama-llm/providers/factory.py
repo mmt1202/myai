@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from providers.base import BaseProvider, ProviderError, response_envelope
+from providers.local_text import LocalTextProvider
 from providers.openai_compatible import OpenAICompatibleProvider
 
 
@@ -20,20 +21,47 @@ def find_model_instance(registry: dict[str, Any], model_id: str) -> dict[str, An
     raise KeyError(f"model instance not found: {model_id}")
 
 
-def build_provider(model_instance: dict[str, Any], *, base_url: str | None = None, api_key_env: str = "MODEL_API_KEY", timeout: int = 120) -> BaseProvider:
+def build_provider(
+    model_instance: dict[str, Any],
+    *,
+    base_url: str | None = None,
+    api_key_env: str = "MODEL_API_KEY",
+    timeout: int = 120,
+    model_path: str | None = None,
+    adapter_path: str | None = None,
+    system_prompt_file: str | None = None,
+) -> BaseProvider:
     provider = model_instance.get("provider")
     runtime = model_instance.get("runtime")
     if provider == "openai_compatible" or runtime == "http_chat_completions":
         return OpenAICompatibleProvider(model_instance, base_url=base_url, api_key_env=api_key_env, timeout=timeout)
+    if provider == "local" or runtime == "transformers":
+        return LocalTextProvider(model_instance, model_path=model_path, adapter_path=adapter_path, system_prompt_file=system_prompt_file)
     raise ProviderError("provider_not_supported", f"unsupported provider/runtime: {provider}/{runtime}")
 
 
-def generate_with_registry(request: dict[str, Any], registry: dict[str, Any], *, model_id: str | None = None, base_url: str | None = None, api_key_env: str = "MODEL_API_KEY", timeout: int = 120) -> dict[str, Any]:
+def generate_with_registry(
+    request: dict[str, Any],
+    registry: dict[str, Any],
+    *,
+    model_id: str | None = None,
+    base_url: str | None = None,
+    api_key_env: str = "MODEL_API_KEY",
+    timeout: int = 120,
+) -> dict[str, Any]:
     selected_model = model_id or request.get("model_id") or request.get("model")
     if not selected_model:
         raise ProviderError("model_not_found", "model_id is required for provider factory")
     instance = find_model_instance(registry, str(selected_model))
-    provider = build_provider(instance, base_url=base_url, api_key_env=api_key_env, timeout=timeout)
+    provider = build_provider(
+        instance,
+        base_url=base_url,
+        api_key_env=api_key_env,
+        timeout=timeout,
+        model_path=request.get("model_path"),
+        adapter_path=request.get("adapter_path"),
+        system_prompt_file=request.get("system_prompt_file"),
+    )
     return provider.generate(request)
 
 
