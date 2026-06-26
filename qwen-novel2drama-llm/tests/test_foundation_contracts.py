@@ -68,6 +68,7 @@ class FoundationContractsTests(unittest.TestCase):
             "/v1/mcp/tools",
             "/v1/mcp/call",
             "/v1/agent/run",
+            "/v1/agent/events",
         ]:
             self.assertIn(endpoint, text)
 
@@ -92,6 +93,19 @@ class FoundationContractsTests(unittest.TestCase):
             "allow_model_tool_write:",
             "approve_model_tools:",
             "fail_on_model_tool_error:",
+        ]:
+            self.assertIn(field, text)
+
+    def test_openapi_agent_schema_contains_event_fields(self) -> None:
+        text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
+        for field in [
+            "disable_events:",
+            "AgentEvent:",
+            "AgentEventsResponse:",
+            "event_id:",
+            "event_type:",
+            "since_event_id",
+            "text/event-stream",
         ]:
             self.assertIn(field, text)
 
