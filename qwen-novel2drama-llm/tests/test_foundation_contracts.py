@@ -84,6 +84,20 @@ class FoundationContractsTests(unittest.TestCase):
         ]:
             self.assertIn(field, text)
 
+    def test_openapi_contains_provider_stream_fields(self) -> None:
+        text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
+        for field in [
+            "ProviderStreamEvent:",
+            "provider_stream_started",
+            "provider_stream_delta",
+            "provider_stream_completed",
+            "provider_stream_failed",
+            "stream_chunk_chars:",
+            "force_chunked_stream:",
+            "text/event-stream",
+        ]:
+            self.assertIn(field, text)
+
     def test_openapi_agent_schema_contains_model_tool_loop_fields(self) -> None:
         text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
         for field in [
