@@ -6,26 +6,28 @@ import sys
 from pathlib import Path
 from typing import Any
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+INFERENCE_DIR = Path(__file__).resolve().parent
+for path in [PROJECT_ROOT, INFERENCE_DIR]:
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from model_utils import generate_text, load_model, load_system_prompt
 from model_version_registry import resolve_model_paths
 from pydantic import BaseModel, Field
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from agent.runtime import run_agent_once  # noqa: E402
-from inference.model_router import route_model  # noqa: E402
-from mcp.adapter import FoundationMCPAdapter  # noqa: E402
-from providers.base import ProviderError, response_envelope  # noqa: E402
-from providers.factory import generate_with_registry  # noqa: E402
-from services.cost_estimator import estimate_request_cost, instance_by_id  # noqa: E402
-from services.memory_store import search_memory, write_memory  # noqa: E402
-from services.rule_engine import evaluate_rules, load_rules  # noqa: E402
-from services.token_counter import estimate_request_usage  # noqa: E402
-from skills.registry import SkillError, call_skill, list_skills, load_json  # noqa: E402
+from agent.runtime import run_agent_once
+from inference.model_router import route_model
+from mcp.adapter import FoundationMCPAdapter
+from providers.base import ProviderError, response_envelope
+from providers.factory import generate_with_registry
+from services.cost_estimator import estimate_request_cost, instance_by_id
+from services.memory_store import search_memory, write_memory
+from services.rule_engine import evaluate_rules, load_rules
+from services.token_counter import estimate_request_usage
+from skills.registry import SkillError, call_skill, list_skills, load_json
 
 app = FastAPI(title="MyAI Foundation API", version="0.1.0")
 TOKENIZER: Any | None = None
@@ -79,7 +81,8 @@ def failed(body: dict[str, Any], code: str, message: str, **kwargs: Any) -> dict
         status="failed",
         request_id_value=request_id(body),
         trace_id=trace_id(body),
-        output=None,
+        output=kwargs.get("output"),
+        route=kwargs.get("route"),
         error={"code": code, "message": message, "retryable": False, "details": kwargs},
     )
 
