@@ -32,6 +32,15 @@ class ProviderFactoryTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["output"]["dry_run"])
 
+    def test_stream_generate_with_openai_provider_dry_run(self) -> None:
+        registry = {"instances": [{"id": "m1", "aliases": [], "provider": "openai_compatible", "runtime": "http_chat_completions", "model_name": "demo"}]}
+        chunks = list(stream_generate_with_registry({"model_id": "m1", "dry_run_provider": True, "input": [{"type": "text", "text": "hello"}]}, registry, base_url="http://example.test/v1"))
+        self.assertEqual(chunks[0]["event_type"], "provider_stream_started")
+        self.assertTrue(any(chunk["event_type"] == "provider_stream_delta" for chunk in chunks))
+        self.assertEqual(chunks[-1]["event_type"], "provider_stream_completed")
+        self.assertTrue(chunks[-1]["done"])
+        self.assertTrue(chunks[-1]["output"]["provider_payload"]["stream"])
+
     def test_generate_with_local_provider_dry_run(self) -> None:
         registry = {"instances": [{"id": "local1", "aliases": ["local"], "provider": "local", "runtime": "transformers", "model_name": "demo"}]}
         result = generate_with_registry({"model_id": "local1", "dry_run": True, "input": [{"type": "text", "text": "hello"}], "model_path": "/tmp/demo-model"}, registry)
