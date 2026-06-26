@@ -2,7 +2,7 @@
 
 This document defines the first machine-readable contract layer for the AI foundation platform.
 
-The goal is to move from research draft to engineering contract. This is not yet the full service implementation.
+The project has moved from research draft to engineering contracts and early runtime service implementations. The OpenAPI contract must stay aligned with the FastAPI runtime in `inference/api_server.py`.
 
 ## Contract files
 
@@ -29,6 +29,7 @@ The foundation layer owns:
 - rules contract
 - skills and MCP contract
 - agent run contract
+- provider adapter contract
 - response envelope and error code contract
 
 ## Unified content blocks
@@ -56,7 +57,7 @@ configs/schemas/content_block_schema.json
 
 ## Response envelope
 
-Every API should return a standard envelope with:
+Every foundation API should return a standard envelope with:
 
 - `request_id`
 - `trace_id`
@@ -121,11 +122,13 @@ OpenAPI file:
 openapi/foundation_api.openapi.yaml
 ```
 
-Initial endpoints:
+Runtime-aligned endpoints:
 
+- `GET /v1/health`
 - `POST /v1/chat`
 - `POST /v1/reason`
 - `POST /v1/multimodal/analyze`
+- `POST /v1/route`
 - `POST /v1/token/count`
 - `POST /v1/cost/estimate`
 - `POST /v1/memory/search`
@@ -134,8 +137,42 @@ Initial endpoints:
 - `GET /v1/skills/list`
 - `POST /v1/skills/call`
 - `GET /v1/mcp/tools`
+- `POST /v1/mcp/call`
 - `POST /v1/agent/run`
-- `GET /v1/jobs/{job_id}`
+
+The earlier planned `/v1/jobs/{job_id}` endpoint is not in the current runtime and is intentionally not listed as implemented.
+
+## Provider execution controls
+
+Provider execution is explicit. `/v1/chat`, `/v1/reason`, `/v1/multimodal/analyze` and `/v1/agent/run` can route and estimate cost without calling a provider.
+
+Execution fields:
+
+- `execute_provider`
+- `dry_run_provider`
+- `base_url`
+- `api_key_env`
+
+The default is route/cost preflight only.
+
+## Agent skill loop controls
+
+`/v1/agent/run` supports request-driven skill calls through `skill_calls`.
+
+Skill permission fields:
+
+- `allow_provider`
+- `allow_write`
+- `approved`
+- `continue_on_error`
+
+Request-level defaults:
+
+- `allow_skill_provider`
+- `allow_skill_write`
+- `approve_skills`
+
+This is not yet model-decided multi-turn tool calling.
 
 ## Short drama/comic specialty
 
@@ -150,12 +187,10 @@ Applications can use these capabilities later through the same routing and API l
 
 ## Next implementation step
 
-After this contract layer, implement:
+After this OpenAPI sync, continue with:
 
-1. schema validators
-2. registry inspectors
-3. model router service
-4. token/cost services
-5. memory and rule services
-6. provider adapter interface
-7. API route skeleton
+1. auth/API key/workspace scopes
+2. local provider adapter for the existing local model runtime
+3. model-decided multi-turn tool loop
+4. OpenAPI lint/check tooling
+5. provider usage reconciliation
