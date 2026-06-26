@@ -24,7 +24,10 @@ Implemented files:
 - `output_text_block`
 - `response_envelope`
 - `normalize_usage`
-- `BaseProvider`
+- `provider_stream_event`
+- `chunk_text`
+- `BaseProvider.generate`
+- `BaseProvider.stream_generate`
 
 The base contract standardizes:
 
@@ -32,8 +35,31 @@ The base contract standardizes:
 - response envelope shape
 - provider usage normalization
 - provider error normalization
+- provider stream chunk shape
 - capability checks
 - modality checks
+
+## Provider stream events
+
+Provider streams emit standard chunks:
+
+```json
+{
+  "chunk_id": "chunk_...",
+  "event_type": "provider_stream_delta",
+  "delta": "partial text",
+  "done": false
+}
+```
+
+Supported event types:
+
+- `provider_stream_started`
+- `provider_stream_delta`
+- `provider_stream_completed`
+- `provider_stream_failed`
+
+The completed event can include final `output` and `usage`.
 
 ## OpenAI-compatible provider
 
@@ -48,6 +74,8 @@ It can:
 - normalize provider usage into foundation usage fields
 - return standard response envelopes
 - normalize HTTP and connection errors
+
+Current streaming behavior for this adapter uses the base fallback stream wrapper unless a provider-specific streaming implementation is added later.
 
 ## Local text provider
 
@@ -64,6 +92,8 @@ It can:
 - serialize generation per cached model by default
 - expose cache stats through provider health and dry-run output
 - generate text through `model_utils.generate_text`
+- stream local text through `model_utils.generate_text_stream`
+- fall back to chunked streaming when native streamer is unavailable
 - return standard response envelopes
 - estimate usage for local runs
 
@@ -75,7 +105,9 @@ Local provider config can come from request fields:
   "adapter_path": "/path/to/lora",
   "system_prompt_file": "prompts/system_prompt.txt",
   "use_cache": true,
-  "serialize_generation": true
+  "serialize_generation": true,
+  "stream": true,
+  "stream_chunk_chars": 128
 }
 ```
 
@@ -100,13 +132,23 @@ python providers/local_text.py --request examples/provider_request.json --cache-
 python providers/local_text.py --request examples/provider_request.json --clear-cache --cache-stats
 ```
 
-Dry-run local provider through factory:
+Streaming local provider through CLI:
+
+```bash
+python providers/local_text.py \
+  --request examples/provider_request.json \
+  --model-path /path/to/model \
+  --stream
+```
+
+Dry-run local provider stream through factory:
 
 ```bash
 python providers/factory.py \
   --request examples/provider_request.json \
   --instances configs/model_instance_registry.json \
-  --model-id local.qwen2_5_1_5b_instruct
+  --model-id local.qwen2_5_1_5b_instruct \
+  --stream
 ```
 
 Real local execution requires `model_path` in the request or `FOUNDATION_LOCAL_MODEL_PATH`.
@@ -120,6 +162,7 @@ Real local execution requires `model_path` in the request or `FOUNDATION_LOCAL_M
 - call OpenAI-compatible providers
 - call local transformers providers
 - call a provider through `generate_with_registry`
+- stream a provider through `stream_generate_with_registry`
 - return standard response envelopes on provider errors
 
 ## Dry run
@@ -159,20 +202,30 @@ FOUNDATION_LOCAL_MODEL_PATH=/path/to/model python providers/factory.py \
   --model-id local.qwen2_5_1_5b_instruct
 ```
 
+Local transformers streaming:
+
+```bash
+FOUNDATION_LOCAL_MODEL_PATH=/path/to/model python providers/factory.py \
+  --request examples/provider_request.json \
+  --instances configs/model_instance_registry.json \
+  --model-id local.qwen2_5_1_5b_instruct \
+  --stream
+```
+
 ## Current limitations
 
 - Local provider is text-only.
 - Local provider loads model weights in-process.
 - Local cache is process-local, not distributed.
 - Generation serialization is per-process, not cluster-wide.
-- No streaming yet.
+- OpenAI-compatible adapter does not yet perform native remote streaming; it uses fallback full-response chunking.
 - Image/video/audio generation adapters are not implemented yet.
 - Provider-specific tokenizer reconciliation is not implemented yet.
 - Provider health probing is still basic.
 
 ## Next steps
 
-- Add streaming support.
+- Add native OpenAI-compatible streaming.
 - Add provider usage reconciliation after provider calls.
 - Add local provider warmup endpoint.
 - Add local provider memory-pressure eviction policy.
