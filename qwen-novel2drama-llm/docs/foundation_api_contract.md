@@ -28,7 +28,7 @@ The foundation layer owns:
 - memory contract
 - rules contract
 - skills and MCP contract
-- agent run contract
+- agent run and event stream contract
 - provider adapter contract
 - API key and workspace scope contract
 - auth audit and rate limit contract
@@ -190,6 +190,7 @@ Runtime-aligned endpoints:
 - `GET /v1/mcp/tools`
 - `POST /v1/mcp/call`
 - `POST /v1/agent/run`
+- `GET /v1/agent/events`
 
 The earlier planned `/v1/jobs/{job_id}` endpoint is not in the current runtime and is intentionally not listed as implemented.
 
@@ -206,9 +207,9 @@ Execution fields:
 
 The default is route/cost preflight only.
 
-## Agent tool loop controls
+## Agent run and event controls
 
-`/v1/agent/run` supports both request-driven skill calls and model-decided tool calls.
+`/v1/agent/run` supports request-driven skill calls, model-decided tool calls, provider execution and event artifacts.
 
 Request-driven skill calls use `skill_calls`.
 
@@ -234,6 +235,15 @@ Model-decided tool loop fields:
 - `approve_model_tools`
 - `fail_on_model_tool_error`
 
+Event controls:
+
+- `disable_events`
+- `GET /v1/agent/events?run_id=<id>` for JSON events
+- `GET /v1/agent/events?run_id=<id>&stream=true` for Server-Sent Events
+- `since_event_id` for incremental reads
+- `limit` for bounded reads
+- `poll_interval` and `max_seconds` for SSE polling behavior
+
 Model-decided tool calls must use registered foundation skill ids as tool names. Tool outputs are appended as `tool_result` content blocks and passed back to the provider for the next round.
 
 ## Short drama/comic specialty
@@ -249,10 +259,10 @@ Applications can use these capabilities later through the same routing and API l
 
 ## Next implementation step
 
-After auth audit and rate limiting v1, continue with:
+After SSE live Agent events v1, continue with:
 
-1. local provider concurrency and cache controls
+1. local provider streaming output
 2. provider usage reconciliation
-3. streaming run events
-4. workspace-level budget and quota checks
+3. workspace-level budget and quota checks
+4. CI contract check
 5. distributed rate limiting backend
