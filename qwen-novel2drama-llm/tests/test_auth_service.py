@@ -48,6 +48,7 @@ class AuthServiceTests(unittest.TestCase):
     def test_required_scope_for_paths(self) -> None:
         self.assertEqual(required_scope_for("POST", "/v1/chat"), "model:invoke")
         self.assertEqual(required_scope_for("POST", "/v1/memory/write"), "memory:write")
+        self.assertEqual(required_scope_for("GET", "/v1/agent/events"), "agent:run")
         self.assertIsNone(required_scope_for("GET", "/v1/health"))
 
     def test_authorize_admin_wildcard(self) -> None:
