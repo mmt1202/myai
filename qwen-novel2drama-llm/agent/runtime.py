@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from inference.model_router import route_model
+from providers.base import ProviderError
+from providers.factory import generate_with_registry
 from services.rule_engine import evaluate_rules, load_rules
+from services.usage_ledger import write_event
 
 RUN_STATES = {"queued", "running", "waiting_tool", "waiting_approval", "completed", "failed", "cancelled"}
 TERMINAL_STATES = {"completed", "failed", "cancelled"}
@@ -59,6 +62,7 @@ def create_run(request: dict[str, Any]) -> dict[str, Any]:
         "steps": [],
         "route_decision": None,
         "rule_decision": None,
+        "provider_response": None,
         "usage": {},
         "cost": {},
         "artifacts": {},
@@ -104,26 +108,41 @@ def build_foundation_request(run: dict[str, Any]) -> dict[str, Any]:
         "request_id": run["run_id"],
         "trace_id": run["run_id"],
         "route_mode": run.get("route_mode") or "balanced",
-        "required_capabilities": ["text.chat"],
+        "required_capabilities": run.get("required_capabilities") or ["text.chat"],
         "input": run.get("input") or [],
     }
     if run.get("task"):
         request["input"] = [{"type": "text", "text": run["task"]}] + request["input"]
-    for key in ["privacy", "budget", "expected_output_tokens", "expected_reasoning_tokens", "max_sensitivity", "owner_id"]:
+    for key in [
+        "privacy",
+        "budget",
+        "expected_output_tokens",
+        "expected_reasoning_tokens",
+        "max_sensitivity",
+        "owner_id",
+        "temperature",
+        "max_output_tokens",
+        "tools",
+        "tool_choice",
+        "system",
+        "developer",
+    ]:
         if run.get(key) is not None:
             request[key] = run[key]
     return request
 
 
-def rule_context_from_route(request: dict[str, Any], route_decision: dict[str, Any]) -> dict[str, Any]:
+def rule_context_from_route(request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any]) -> dict[str, Any]:
     selected = route_decision.get("selected") or {}
+    selected_id = route_decision.get("selected_model_id")
+    instance = next((item for item in instances.get("instances", []) if item.get("id") == selected_id), {})
     return {
         "request": request,
         "candidate": {
-            "provider": selected.get("provider"),
+            "provider": selected.get("provider") or instance.get("provider"),
             "estimated_cost": selected.get("estimated_cost") or {},
-            "capabilities": selected.get("capabilities") or [],
-            "lifecycle": selected.get("lifecycle"),
+            "capabilities": instance.get("capabilities") or [],
+            "lifecycle": instance.get("lifecycle"),
         },
     }
 
@@ -144,6 +163,59 @@ def approval_required(run: dict[str, Any], rule_decision: dict[str, Any], route_
         threshold = ((run.get("budget") or {}).get("approval_threshold") or None)
         return threshold is not None and float(estimated) > float(threshold)
     return False
+
+
+def build_provider_request(request: dict[str, Any], foundation_request: dict[str, Any], selected_model_id: str) -> dict[str, Any]:
+    provider_request = {**foundation_request}
+    provider_request["model_id"] = selected_model_id
+    provider_request["model"] = selected_model_id
+    provider_request["dry_run"] = bool(request.get("dry_run_provider"))
+    provider_request["base_url"] = request.get("base_url")
+    provider_request["api_key_env"] = request.get("api_key_env") or "MODEL_API_KEY"
+    return provider_request
+
+
+def record_usage(output_dir: Path, run: dict[str, Any], provider_response: dict[str, Any] | None = None) -> None:
+    response = provider_response or {}
+    usage = response.get("usage") or run.get("usage") or {}
+    cost = response.get("cost") or run.get("cost") or {}
+    write_event(
+        output_dir / "usage_ledger.jsonl",
+        {
+            "request_id": run.get("run_id"),
+            "trace_id": run.get("run_id"),
+            "model_id": (run.get("route_decision") or {}).get("selected_model_id"),
+            "provider": (((run.get("route_decision") or {}).get("selected") or {}).get("provider")),
+            "route_mode": run.get("route_mode"),
+            "usage": usage,
+            "cost": cost,
+            "status": "actual" if provider_response else "estimated",
+        },
+    )
+
+
+def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any]) -> None:
+    selected_model_id = route_decision.get("selected_model_id")
+    if not selected_model_id:
+        raise ProviderError("model_not_found", "selected model id is missing")
+    provider_request = build_provider_request(request, foundation_request, selected_model_id)
+    response = generate_with_registry(
+        provider_request,
+        instances,
+        model_id=selected_model_id,
+        base_url=request.get("base_url"),
+        api_key_env=request.get("api_key_env") or "MODEL_API_KEY",
+    )
+    run["provider_response"] = response
+    if response.get("usage"):
+        run["usage"] = response["usage"]
+    if response.get("cost"):
+        run["cost"] = response["cost"]
+    save_json(output_dir / "provider_response.json", response)
+    record_usage(output_dir, run, provider_response=response)
+    add_step(run, "provider_generate", input_data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run")}, output_data=response, status="completed" if response.get("status") == "ok" else "failed")
+    if response.get("status") != "ok":
+        raise ProviderError("provider_error", "provider response was not ok", details=response)
 
 
 def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path, instances_path: Path | None = None, rules_path: Path | None = None) -> dict[str, Any]:
@@ -169,22 +241,38 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
         return run
 
     ruleset = load_rules(rules_path or project_root / "configs" / "rules" / "default_rules.yaml")
-    rule_context = rule_context_from_route(foundation_request, route_decision)
+    rule_context = rule_context_from_route(foundation_request, route_decision, instances)
     rule_decision = evaluate_rules(ruleset, rule_context)
     run["rule_decision"] = rule_decision
     add_step(run, "evaluate_rules", input_data=rule_context, output_data=rule_decision)
 
     if rule_decision.get("decision") == "deny":
         run["error"] = "policy_denied"
+        record_usage(output_dir, run)
         transition(run, "failed")
     elif approval_required(run, rule_decision, route_decision):
         add_step(run, "approval_gate", status="waiting_approval", output_data={"reason": "approval_required"})
+        record_usage(output_dir, run)
         transition(run, "waiting_approval")
+    elif request.get("execute_provider"):
+        try:
+            run_provider_step(project_root, output_dir, run, request, foundation_request, route_decision, instances)
+            transition(run, "completed")
+        except ProviderError as exc:
+            run["error"] = exc.code
+            add_step(run, "provider_error", status="failed", output_data={"code": exc.code, "message": exc.message, "details": exc.details}, error=exc.message)
+            transition(run, "failed")
     else:
-        add_step(run, "ready_for_provider", output_data={"selected_model_id": route_decision.get("selected_model_id")})
+        add_step(run, "ready_for_provider", output_data={"selected_model_id": route_decision.get("selected_model_id"), "provider_execution": "skipped"})
+        record_usage(output_dir, run)
         transition(run, "completed")
 
-    run["artifacts"] = {"report": str(output_dir / "agent_run_report.json")}
+    run["artifacts"] = {
+        "report": str(output_dir / "agent_run_report.json"),
+        "usage_ledger": str(output_dir / "usage_ledger.jsonl"),
+    }
+    if run.get("provider_response"):
+        run["artifacts"]["provider_response"] = str(output_dir / "provider_response.json")
     save_json(output_dir / "agent_run_report.json", run)
     return run
 
@@ -196,9 +284,21 @@ def main() -> int:
     parser.add_argument("--output-dir", default="outputs/agent_runtime/run")
     parser.add_argument("--instances", default=None)
     parser.add_argument("--rules", default=None)
+    parser.add_argument("--execute-provider", action="store_true")
+    parser.add_argument("--dry-run-provider", action="store_true")
+    parser.add_argument("--base-url", default=None)
+    parser.add_argument("--api-key-env", default="MODEL_API_KEY")
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
     request = load_json(Path(args.request))
+    if args.execute_provider:
+        request["execute_provider"] = True
+    if args.dry_run_provider:
+        request["dry_run_provider"] = True
+    if args.base_url:
+        request["base_url"] = args.base_url
+    if args.api_key_env:
+        request["api_key_env"] = args.api_key_env
     run = run_agent_once(
         project_root=project_root,
         request=request,
