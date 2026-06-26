@@ -14,22 +14,12 @@ paths:
       summary: Get foundation service health and runtime capabilities
       operationId: getFoundationHealth
       responses:
-        '200':
-          description: Foundation health response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HealthResponse'
+        '200': {description: Foundation health response, content: {application/json: {schema: {$ref: '#/components/schemas/HealthResponse'}}}}
   /v1/chat:
     post:
       summary: Unified text chat generation with route-first preflight
       operationId: createChat
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FoundationRequest'
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationRequest'}}}}
       responses:
         '200': {description: Chat response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
         '401': {description: Missing or invalid API key, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
@@ -287,6 +277,12 @@ components:
         approval_policy: {type: string, enum: [never, on_write, on_cost, always]}
         execute_provider: {type: boolean, default: false}
         dry_run_provider: {type: boolean, default: false}
+        enable_model_tool_loop: {type: boolean, default: false}
+        max_tool_rounds: {type: integer, default: 3}
+        allow_model_tool_provider: {type: boolean, default: false}
+        allow_model_tool_write: {type: boolean, default: false}
+        approve_model_tools: {type: boolean, default: false}
+        fail_on_model_tool_error: {type: boolean, default: true}
         base_url: {type: string}
         api_key_env: {type: string, default: MODEL_API_KEY}
         skill_calls: {type: array, items: {$ref: '#/components/schemas/AgentSkillCall'}}
