@@ -56,10 +56,11 @@ Supported event types:
 
 - `provider_stream_started`
 - `provider_stream_delta`
+- `provider_stream_tool_call_delta`
 - `provider_stream_completed`
 - `provider_stream_failed`
 
-The completed event can include final `output` and `usage`.
+The completed event can include final `output`, `usage` and reconstructed `tool_calls`.
 
 ## OpenAI-compatible provider
 
@@ -78,8 +79,12 @@ It can:
 - send native `stream=true` chat completions requests
 - parse provider SSE `data: {...}` lines
 - stop on `data: [DONE]`
-- convert remote deltas to `ProviderStreamEvent` chunks
-- include final streamed text and usage in `provider_stream_completed`
+- convert remote text deltas to `ProviderStreamEvent` chunks
+- emit `provider_stream_tool_call_delta` for remote `delta.tool_calls` chunks
+- reconstruct streamed tool calls by `index`
+- append fragmented `function.name` and `function.arguments`
+- decode complete JSON arguments into `arguments_json` when possible
+- include final streamed text, usage and reconstructed tool calls in `provider_stream_completed`
 
 Native OpenAI-compatible streaming through CLI:
 
@@ -108,6 +113,37 @@ This sets:
 ```
 
 when building the OpenAI-compatible payload.
+
+Tool call streaming behavior:
+
+```text
+delta.tool_calls[index].id              -> tool_calls[index].id
+delta.tool_calls[index].type            -> tool_calls[index].type
+delta.tool_calls[index].function.name   -> appended function.name
+delta.tool_calls[index].function.arguments -> appended function.arguments
+```
+
+The final completed event can include:
+
+```json
+{
+  "output": {
+    "tool_calls": [
+      {
+        "id": "call_...",
+        "type": "function",
+        "function": {
+          "name": "foundation.token_count",
+          "arguments": "{\"request\":{\"input\":[]}}"
+        },
+        "arguments_json": {"request": {"input": []}}
+      }
+    ]
+  }
+}
+```
+
+The provider adapter only reconstructs tool calls; it does not execute them.
 
 ## Local text provider
 
@@ -269,14 +305,15 @@ FOUNDATION_LOCAL_MODEL_PATH=/path/to/model python providers/factory.py \
 - Local provider loads model weights in-process.
 - Local cache is process-local, not distributed.
 - Generation serialization is per-process, not cluster-wide.
-- OpenAI-compatible streaming currently handles text deltas; streamed tool-call delta reconstruction is not implemented yet.
+- Streamed tool-call reconstruction supports OpenAI-style function tool calls only.
+- Reconstructed tool calls are not automatically executed by the provider adapter.
 - Image/video/audio generation adapters are not implemented yet.
 - Provider-specific tokenizer reconciliation is not implemented yet.
 - Provider health probing is still basic.
 
 ## Next steps
 
-- Add streamed tool-call delta reconstruction.
+- Bridge streamed provider tool calls into Agent tool loop execution.
 - Add provider usage reconciliation after provider calls.
 - Add local provider warmup endpoint.
 - Add local provider memory-pressure eviction policy.
