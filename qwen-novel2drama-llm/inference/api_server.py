@@ -7,7 +7,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Iterator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INFERENCE_DIR = Path(__file__).resolve().parent
@@ -26,8 +26,8 @@ from agent.events import read_agent_events, summarize_agent_events
 from agent.runtime import run_agent_once
 from inference.model_router import route_model
 from mcp.adapter import FoundationMCPAdapter
-from providers.base import ProviderError, response_envelope
-from providers.factory import generate_with_registry
+from providers.base import ProviderError, provider_stream_event, response_envelope
+from providers.factory import generate_with_registry, stream_generate_with_registry
 from services.auth import AuthError, auth_required_from_env, build_auth_context, key_store_path_from_env, load_key_store
 from services.auth_audit import write_auth_event
 from services.cost_estimator import estimate_request_cost, instance_by_id
@@ -128,10 +128,36 @@ def limited_events(events: list[dict[str, Any]], limit: int = 200) -> list[dict[
 
 
 def sse_event(event: dict[str, Any]) -> str:
-    event_id = str(event.get("event_id") or "")
+    event_id = str(event.get("event_id") or event.get("chunk_id") or "")
     event_type = str(event.get("event_type") or "agent_event")
     data = json.dumps(event, ensure_ascii=False, sort_keys=True)
     return f"id: {event_id}\nevent: {event_type}\ndata: {data}\n\n"
+
+
+def provider_sse_event(chunk: dict[str, Any]) -> str:
+    return sse_event(chunk)
+
+
+def stream_provider_sse(chunks: Iterator[dict[str, Any]]) -> Iterator[str]:
+    try:
+        for chunk in chunks:
+            yield provider_sse_event(chunk)
+    except ProviderError as exc:
+        yield provider_sse_event(
+            provider_stream_event(
+                "provider_stream_failed",
+                error=exc.to_error(),
+                done=True,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        yield provider_sse_event(
+            provider_stream_event(
+                "provider_stream_failed",
+                error={"code": "provider_error", "message": str(exc), "retryable": False, "details": {}},
+                done=True,
+            )
+        )
 
 
 async def stream_agent_events(run_id: str, *, since_event_id: str | None = None, poll_interval: float = 1.0, max_seconds: int = 60, limit: int = 200) -> AsyncIterator[str]:
@@ -257,7 +283,7 @@ def foundation_health() -> dict[str, Any]:
         "service": "myai-foundation",
         "model_version": ACTIVE_MODEL_VERSION,
         "model_path": ACTIVE_MODEL_PATH,
-        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "provider", "auth", "rate_limit", "audit"],
+        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "provider", "provider_stream", "auth", "rate_limit", "audit"],
     }
 
 
@@ -385,7 +411,7 @@ def agent_events_api(run_id: str = "latest", stream: bool = False, since_event_i
 
 
 @app.post("/v1/chat")
-def chat_api(body: dict[str, Any]) -> dict[str, Any]:
+def chat_api(body: dict[str, Any]) -> dict[str, Any] | StreamingResponse:
     registry = model_instances()
     route = route_model({**body, "required_capabilities": body.get("required_capabilities") or ["text.chat"]}, registry)
     if route.get("status") != "routed":
@@ -394,6 +420,13 @@ def chat_api(body: dict[str, Any]) -> dict[str, Any]:
         selected = route.get("selected") or {}
         return ok(body, {"route": route, "provider_execution": "skipped"}, usage=route.get("estimated_usage"), cost=selected.get("estimated_cost"), route=route, warnings=["provider_execution_skipped"])
     provider_request = {**body, "model_id": route.get("selected_model_id")}
+    if body.get("stream"):
+        chunks = stream_generate_with_registry(provider_request, registry, model_id=route.get("selected_model_id"), base_url=body.get("base_url"), api_key_env=body.get("api_key_env") or "MODEL_API_KEY")
+        return StreamingResponse(
+            stream_provider_sse(chunks),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
     try:
         result = generate_with_registry(provider_request, registry, model_id=route.get("selected_model_id"), base_url=body.get("base_url"), api_key_env=body.get("api_key_env") or "MODEL_API_KEY")
     except ProviderError as exc:
@@ -403,12 +436,12 @@ def chat_api(body: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/v1/reason")
-def reason_api(body: dict[str, Any]) -> dict[str, Any]:
+def reason_api(body: dict[str, Any]) -> dict[str, Any] | StreamingResponse:
     return chat_api({**body, "required_capabilities": body.get("required_capabilities") or ["text.reason"], "expected_reasoning_tokens": body.get("expected_reasoning_tokens") or 512})
 
 
 @app.post("/v1/multimodal/analyze")
-def multimodal_analyze_api(body: dict[str, Any]) -> dict[str, Any]:
+def multimodal_analyze_api(body: dict[str, Any]) -> dict[str, Any] | StreamingResponse:
     return chat_api({**body, "required_capabilities": body.get("required_capabilities") or ["vision.understand"]})
 
 
