@@ -1,12 +1,13 @@
 """Qwen 模型加载与生成的共享工具。"""
 from __future__ import annotations
 
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import torch
 from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 
 DEFAULT_SYSTEM_PROMPT = "你是专业 AI 短剧编剧、短视频分镜导演、AI 视频生成提示词专家。"
 
@@ -44,6 +45,12 @@ def load_model(model_path: str, adapter_path: str | None = None) -> tuple[Any, A
     return tokenizer, model, device
 
 
+def build_chat_inputs(tokenizer: Any, model: Any, prompt: str, system_prompt: str = DEFAULT_SYSTEM_PROMPT) -> Any:
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}]
+    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    return tokenizer([text], return_tensors="pt").to(model.device)
+
+
 def generate_text(
     tokenizer: Any,
     model: Any,
@@ -53,9 +60,7 @@ def generate_text(
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
 ) -> str:
     """使用 Qwen chat template 生成文本。"""
-    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}]
-    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    inputs = tokenizer([text], return_tensors="pt").to(model.device)
+    inputs = build_chat_inputs(tokenizer, model, prompt, system_prompt)
     with torch.no_grad():
         output_ids = model.generate(
             **inputs,
@@ -66,3 +71,30 @@ def generate_text(
         )
     new_ids = output_ids[0][inputs.input_ids.shape[-1] :]
     return tokenizer.decode(new_ids, skip_special_tokens=True).strip()
+
+
+def generate_text_stream(
+    tokenizer: Any,
+    model: Any,
+    prompt: str,
+    max_new_tokens: int,
+    temperature: float,
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+) -> Iterator[str]:
+    """使用 transformers TextIteratorStreamer 流式生成文本片段。"""
+    inputs = build_chat_inputs(tokenizer, model, prompt, system_prompt)
+    streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+    generation_kwargs = {
+        **inputs,
+        "streamer": streamer,
+        "max_new_tokens": max_new_tokens,
+        "temperature": temperature,
+        "do_sample": temperature > 0,
+        "eos_token_id": tokenizer.eos_token_id,
+    }
+    thread = threading.Thread(target=model.generate, kwargs=generation_kwargs, daemon=True)
+    thread.start()
+    for text in streamer:
+        if text:
+            yield text
+    thread.join()
