@@ -1,14 +1,31 @@
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from providers.base import chunk_text, normalize_usage, provider_stream_event, response_envelope, text_from_content_blocks, text_from_provider_response
 from providers.openai_compatible import OpenAICompatibleProvider
+
+
+class FakeSSEProviderResponse:
+    def __init__(self, lines: list[str]) -> None:
+        self.lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+        return None
+
+    def __iter__(self):
+        for line in self.lines:
+            yield line.encode("utf-8")
 
 
 class ProviderAdapterContractTests(unittest.TestCase):
@@ -56,6 +73,12 @@ class ProviderAdapterContractTests(unittest.TestCase):
         self.assertEqual(payload["max_tokens"], 32)
         self.assertEqual(payload["messages"][-1]["content"], "hello")
 
+    def test_openai_stream_payload_building(self) -> None:
+        provider = OpenAICompatibleProvider({"id": "m1", "model_name": "demo-model"})
+        payload = provider.build_payload({"input": [{"type": "text", "text": "hello"}], "stream": True, "stream_include_usage": True})
+        self.assertTrue(payload["stream"])
+        self.assertEqual(payload["stream_options"], {"include_usage": True})
+
     def test_openai_dry_run(self) -> None:
         provider = OpenAICompatibleProvider({"id": "m1", "model_name": "demo-model"}, base_url="http://example.test/v1")
         result = provider.generate({"request_id": "r1", "input": [{"type": "text", "text": "hello"}], "dry_run": True})
@@ -63,12 +86,53 @@ class ProviderAdapterContractTests(unittest.TestCase):
         self.assertTrue(result["output"]["dry_run"])
         self.assertIn("provider_payload", result["output"])
 
-    def test_openai_dry_run_stream_falls_back_to_full_response_chunk(self) -> None:
+    def test_openai_dry_run_provider_alias(self) -> None:
+        provider = OpenAICompatibleProvider({"id": "m1", "model_name": "demo-model"}, base_url="http://example.test/v1")
+        result = provider.generate({"request_id": "r1", "input": [{"type": "text", "text": "hello"}], "dry_run_provider": True})
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["output"]["dry_run"])
+
+    def test_openai_dry_run_stream_uses_native_stream_shape(self) -> None:
         provider = OpenAICompatibleProvider({"id": "m1", "model_name": "demo-model"}, base_url="http://example.test/v1")
         chunks = list(provider.stream_generate({"request_id": "r1", "input": [{"type": "text", "text": "hello"}], "dry_run": True}))
         self.assertEqual(chunks[0]["event_type"], "provider_stream_started")
+        self.assertEqual(chunks[1]["event_type"], "provider_stream_delta")
+        self.assertIn('"stream": true', chunks[1]["delta"])
         self.assertEqual(chunks[-1]["event_type"], "provider_stream_completed")
         self.assertTrue(chunks[-1]["done"])
+
+    def test_openai_iter_sse_json(self) -> None:
+        provider = OpenAICompatibleProvider({"id": "m1", "model_name": "demo-model"})
+        events = list(provider.iter_sse_json(FakeSSEProviderResponse([": keepalive\n", "data: {\"a\": 1}\n", "data: [DONE]\n"])))
+        self.assertEqual(events, [{"a": 1}])
+
+    def test_openai_native_stream_generate(self) -> None:
+        provider = OpenAICompatibleProvider({"id": "m1", "model_name": "demo-model"}, base_url="http://example.test/v1")
+        response = FakeSSEProviderResponse(
+            [
+                'data: {"id":"c1","model":"demo-model","choices":[{"delta":{"content":"hel"},"finish_reason":null}]}\n',
+                'data: {"id":"c2","model":"demo-model","choices":[{"delta":{"content":"lo"},"finish_reason":null}]}\n',
+                'data: {"id":"c3","model":"demo-model","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}\n',
+                "data: [DONE]\n",
+            ]
+        )
+        captured: dict[str, object] = {}
+
+        def fake_urlopen(request, timeout=120):  # type: ignore[no-untyped-def]
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            captured["timeout"] = timeout
+            return response
+
+        with patch("providers.openai_compatible.urllib.request.urlopen", side_effect=fake_urlopen):
+            chunks = list(provider.stream_generate({"request_id": "s1", "input": [{"type": "text", "text": "hello"}], "stream_include_usage": True}))
+        self.assertTrue(captured["payload"]["stream"])  # type: ignore[index]
+        self.assertEqual(chunks[0]["event_type"], "provider_stream_started")
+        deltas = [chunk["delta"] for chunk in chunks if chunk["event_type"] == "provider_stream_delta"]
+        self.assertEqual(deltas, ["hel", "lo"])
+        self.assertEqual(chunks[-1]["event_type"], "provider_stream_completed")
+        self.assertEqual(chunks[-1]["output"]["content"][0]["text"], "hello")
+        self.assertEqual(chunks[-1]["usage"]["total_tokens"], 3)
+        self.assertEqual(chunks[-1]["output"]["finish_reason"], "stop")
 
     def test_parse_chat_response(self) -> None:
         provider = OpenAICompatibleProvider({"id": "m1", "model_name": "demo-model"})
