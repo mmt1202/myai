@@ -111,6 +111,45 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertEqual(run["status"], "failed")
             self.assertEqual(run["error"], "provider_not_supported")
 
+    def test_run_agent_executes_safe_skill_loop(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+            run = run_agent_once(
+                project_root=PROJECT_ROOT,
+                request={
+                    "task": "run safe skill",
+                    "route_mode": "balanced",
+                    "privacy": {"local_only": True},
+                    "approval_policy": "never",
+                    "skill_calls": [
+                        {
+                            "name": "foundation.token_count",
+                            "arguments": {"request": {"input": [{"type": "text", "text": "hello"}]}, "expected_output_tokens": 10},
+                        }
+                    ],
+                },
+                output_dir=Path(tmpdir),
+            )
+            self.assertEqual(run["status"], "completed")
+            self.assertEqual(run["skill_results"][0]["status"], "ok")
+            self.assertTrue((Path(tmpdir) / "skill_results.json").exists())
+
+    def test_run_agent_skill_permission_failure_fails_run(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+            run = run_agent_once(
+                project_root=PROJECT_ROOT,
+                request={
+                    "task": "denied skill",
+                    "route_mode": "balanced",
+                    "privacy": {"local_only": True},
+                    "approval_policy": "never",
+                    "skill_calls": [{"name": "foundation.provider_generate", "arguments": {"request": {}, "registry": {}}}],
+                },
+                output_dir=Path(tmpdir),
+            )
+            self.assertEqual(run["status"], "failed")
+            self.assertEqual(run["error"], "skill_failed")
+            self.assertTrue((Path(tmpdir) / "skill_results.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
