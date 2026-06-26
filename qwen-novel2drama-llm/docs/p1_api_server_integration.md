@@ -141,9 +141,19 @@ or a request field:
 {
   "execute_provider": true,
   "model_path": "/path/to/model",
+  "use_cache": true,
+  "serialize_generation": true,
   "input": [{"type": "text", "text": "hello"}]
 }
 ```
+
+Local provider cache and concurrency controls:
+
+- `use_cache`: reuse loaded model runtime in the current process.
+- `disable_cache`: request-level opt-out.
+- `serialize_generation`: serialize generation per cached model runtime.
+- `providers.local_text.cache_stats()`: inspect process-local cache state.
+- `providers.local_text.clear_model_cache()`: clear process-local cache state.
 
 ## Agent provider execution and tool loops
 
@@ -260,6 +270,7 @@ for the default JSONL memory store.
 - Model-decided tool loop is synchronous.
 - Tool names must map to registered foundation skill ids.
 - Local provider is text-only and loads weights in-process.
+- Local provider cache is process-local.
 - No streaming API yet.
 - Auth is API-key based, not full OAuth/OIDC.
 - Rate limit state is file based, not distributed.
@@ -267,7 +278,7 @@ for the default JSONL memory store.
 
 ## Next steps
 
-- Add local provider concurrency controls.
+- Add local provider streaming support.
 - Add workspace-level budget and quota checks.
 - Add distributed rate limiting backend.
 - Add streaming events.
