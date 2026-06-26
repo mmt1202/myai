@@ -59,6 +59,10 @@ It can:
 - resolve model path from request, environment or model instance runtime config
 - run dry-run without loading model weights
 - load local transformers model through `model_utils.load_model`
+- cache loaded local model runtimes in process
+- protect cache load with a process-local load lock
+- serialize generation per cached model by default
+- expose cache stats through provider health and dry-run output
 - generate text through `model_utils.generate_text`
 - return standard response envelopes
 - estimate usage for local runs
@@ -69,7 +73,9 @@ Local provider config can come from request fields:
 {
   "model_path": "/path/to/model",
   "adapter_path": "/path/to/lora",
-  "system_prompt_file": "prompts/system_prompt.txt"
+  "system_prompt_file": "prompts/system_prompt.txt",
+  "use_cache": true,
+  "serialize_generation": true
 }
 ```
 
@@ -79,6 +85,19 @@ or environment variables:
 FOUNDATION_LOCAL_MODEL_PATH
 FOUNDATION_LOCAL_ADAPTER_PATH
 FOUNDATION_LOCAL_SYSTEM_PROMPT
+```
+
+Runtime cache helpers:
+
+- `cache_stats()`
+- `clear_model_cache()`
+- `local_cache_key()`
+
+CLI cache helpers:
+
+```bash
+python providers/local_text.py --request examples/provider_request.json --cache-stats
+python providers/local_text.py --request examples/provider_request.json --clear-cache --cache-stats
 ```
 
 Dry-run local provider through factory:
@@ -144,16 +163,17 @@ FOUNDATION_LOCAL_MODEL_PATH=/path/to/model python providers/factory.py \
 
 - Local provider is text-only.
 - Local provider loads model weights in-process.
+- Local cache is process-local, not distributed.
+- Generation serialization is per-process, not cluster-wide.
 - No streaming yet.
-- No model-level concurrency guard yet.
 - Image/video/audio generation adapters are not implemented yet.
 - Provider-specific tokenizer reconciliation is not implemented yet.
-- Provider health probing is basic.
+- Provider health probing is still basic.
 
 ## Next steps
 
-- Add model-decided Agent tool loop.
 - Add streaming support.
-- Add image/video/audio provider adapter interfaces.
 - Add provider usage reconciliation after provider calls.
-- Add local model concurrency and cache controls.
+- Add local provider warmup endpoint.
+- Add local provider memory-pressure eviction policy.
+- Add image/video/audio provider adapter interfaces.
