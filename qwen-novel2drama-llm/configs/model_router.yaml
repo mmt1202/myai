@@ -1,0 +1,126 @@
+router_name: foundation_model_router_v1
+principle: >
+  Select the best model instance by required capabilities, modality, privacy,
+  cost, latency, quality and fallback policy. Hard filters run before scoring.
+
+route_modes:
+  smart:
+    description: Highest expected quality within policy and budget.
+    hard_filters:
+      require_lifecycle: [active, planned]
+      require_status: [configured, placeholder]
+    scoring:
+      quality: 0.55
+      capability_match: 0.25
+      latency: 0.10
+      cost: 0.05
+      privacy: 0.05
+  cheap:
+    description: Lowest cost candidate that satisfies required capabilities.
+    scoring:
+      cost: 0.60
+      capability_match: 0.25
+      latency: 0.10
+      quality: 0.05
+  balanced:
+    description: Default cost-quality balance for most production tasks.
+    scoring:
+      quality: 0.35
+      cost: 0.25
+      capability_match: 0.25
+      latency: 0.10
+      privacy: 0.05
+  local_first:
+    description: Prefer local models for privacy and predictable marginal cost.
+    hard_filters:
+      prefer_provider: local
+    scoring:
+      privacy: 0.35
+      cost: 0.25
+      capability_match: 0.25
+      quality: 0.10
+      latency: 0.05
+  cloud_first:
+    description: Prefer external frontier capability when privacy rules allow.
+    scoring:
+      quality: 0.50
+      capability_match: 0.25
+      latency: 0.15
+      cost: 0.10
+  drama_specialist:
+    description: Prefer models strong at story reasoning and visual planning for AI short drama/comic workloads.
+    required_capability_any:
+      - drama.story_reasoning
+      - drama.visual_planning
+      - text.reason
+    scoring:
+      drama_relevance: 0.45
+      quality: 0.25
+      capability_match: 0.20
+      cost: 0.05
+      latency: 0.05
+  code_specialist:
+    description: Prefer models and tools for code understanding, patch planning and tool calling.
+    required_capability_any:
+      - tool.calling
+      - agent.run
+      - text.reason
+    scoring:
+      capability_match: 0.40
+      quality: 0.30
+      latency: 0.15
+      cost: 0.10
+      privacy: 0.05
+
+hard_policy_filters:
+  - name: capability_required
+    description: Candidate must implement all explicitly required capabilities.
+  - name: modality_required
+    description: Candidate must accept all required input modalities and produce requested output modality.
+  - name: privacy_boundary
+    description: External providers are rejected when request requires local-only processing.
+  - name: context_window
+    description: Candidate must fit estimated input, memory, tool and output budget.
+  - name: budget_limit
+    description: Candidate must fit request and workspace budget constraints.
+  - name: region_policy
+    description: Candidate must satisfy region and data residency policy.
+  - name: lifecycle_policy
+    description: Deprecated or blocked models are rejected unless explicitly allowed.
+
+fallback_policy:
+  max_fallbacks: 3
+  fallback_order:
+    - same_provider_lower_cost
+    - same_capability_alternative_provider
+    - local_text_only_degraded
+    - ask_for_user_approval
+  record_fallback_reason: true
+
+route_decision_log:
+  required_fields:
+    - request_id
+    - trace_id
+    - route_mode
+    - required_capabilities
+    - required_modalities
+    - candidate_model_ids
+    - rejected_candidates
+    - selected_model_id
+    - fallback_chain
+    - estimated_input_tokens
+    - estimated_output_tokens
+    - estimated_cost
+    - policy_hits
+    - created_at
+
+cost_policy:
+  default_currency: USD
+  require_preflight_estimate: true
+  reconcile_actual_provider_usage: true
+  cache_accounting: true
+
+quality_policy:
+  require_eval_score_when_available: false
+  prefer_latest_non_deprecated_snapshot: true
+  allow_placeholder_models_in_contract_tests: true
