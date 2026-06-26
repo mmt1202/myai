@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://myai.local/schemas/memory_item_schema.json",
+  "title": "Foundation Memory Item",
+  "description": "Scoped memory item used by the AI foundation memory service.",
+  "type": "object",
+  "required": ["id", "scope", "content", "created_at"],
+  "properties": {
+    "id": {"type": "string"},
+    "scope": {"type": "string", "enum": ["session", "user", "project", "task"]},
+    "owner_id": {"type": "string"},
+    "project_id": {"type": "string"},
+    "session_id": {"type": "string"},
+    "task_id": {"type": "string"},
+    "content": {"type": "string"},
+    "summary": {"type": "string"},
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "sensitivity": {"type": "string", "enum": ["public", "internal", "confidential", "secret"], "default": "internal"},
+    "retention": {"type": "string", "enum": ["none", "session", "project", "long_term"], "default": "project"},
+    "ttl_seconds": {"type": "integer", "minimum": 0},
+    "expires_at": {"type": "string"},
+    "source": {"type": "string"},
+    "importance": {"type": "number", "minimum": 0, "maximum": 1},
+    "metadata": {"type": "object", "additionalProperties": true},
+    "created_at": {"type": "string"},
+    "updated_at": {"type": "string"},
+    "deleted_at": {"type": "string"}
+  },
+  "additionalProperties": false
+}
