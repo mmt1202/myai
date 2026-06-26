@@ -111,11 +111,23 @@ To stream provider output as SSE:
 
 ```json
 {
-  "route_mode": "local_first",
+  "route_mode": "cloud_first",
   "execute_provider": true,
   "stream": true,
-  "model_path": "/path/to/model",
+  "base_url": "https://provider.example/v1",
+  "api_key_env": "MODEL_API_KEY",
   "input": [{"type": "text", "text": "hello"}]
+}
+```
+
+For OpenAI-compatible providers, the adapter sends native `stream=true` to `/chat/completions`, parses provider SSE `data: {...}` lines, stops on `data: [DONE]`, and converts deltas into foundation `ProviderStreamEvent` chunks.
+
+To ask compatible providers for final stream usage when they support it:
+
+```json
+{
+  "stream": true,
+  "stream_include_usage": true
 }
 ```
 
@@ -276,7 +288,7 @@ GET /v1/agent/events?run_id=demo-run&stream=true
 
 - Agent SSE currently polls the JSONL event file.
 - `/v1/chat` provider streaming is SSE only, not WebSocket.
-- OpenAI-compatible adapter does not yet use native remote streaming.
+- OpenAI-compatible streaming currently handles text deltas; streamed tool-call delta reconstruction is not implemented yet.
 - Model-decided tool loop is synchronous.
 - Tool names must map to registered foundation skill ids.
 - Local provider is text-only and loads weights in-process.
@@ -287,7 +299,7 @@ GET /v1/agent/events?run_id=demo-run&stream=true
 
 ## Next steps
 
-- Add native OpenAI-compatible streaming.
+- Add streamed tool-call delta reconstruction.
 - Add workspace-level budget and quota checks.
 - Add distributed rate limiting backend.
 - Add resume/cancel/retry for Agent runs.
