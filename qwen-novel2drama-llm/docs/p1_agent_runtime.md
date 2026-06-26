@@ -73,6 +73,12 @@ The runtime writes a JSONL event stream for every run by default:
 outputs/agent_runtime/<run>/events.jsonl
 ```
 
+The API server writes Agent runs under:
+
+```text
+outputs/agent_runtime/api/<request_id-or-run_id-or-latest>/
+```
+
 The final run report includes:
 
 - `artifacts.events`
@@ -104,13 +110,13 @@ Common event types:
 - `run_completed`
 - `run_failed`
 
-Read events:
+Read events from CLI:
 
 ```bash
 python agent/events.py --events outputs/agent_runtime/demo/events.jsonl
 ```
 
-Read summary:
+Read summary from CLI:
 
 ```bash
 python agent/events.py --events outputs/agent_runtime/demo/events.jsonl --summary
@@ -130,7 +136,40 @@ or CLI:
 python agent/runtime.py --request examples/agent_request.json --disable-events
 ```
 
-This is file-backed event streaming v1. It is not SSE/WebSocket yet.
+## Live Agent events API
+
+`GET /v1/agent/events` can read existing events as JSON or stream new events as Server-Sent Events.
+
+JSON mode:
+
+```text
+GET /v1/agent/events?run_id=demo
+```
+
+SSE mode:
+
+```text
+GET /v1/agent/events?run_id=demo&stream=true
+```
+
+Supported query parameters:
+
+- `run_id`
+- `stream`
+- `since_event_id`
+- `limit`
+- `poll_interval`
+- `max_seconds`
+
+SSE frames use:
+
+```text
+id: <event_id>
+event: <event_type>
+data: <full event JSON>
+```
+
+The stream stops when it emits a terminal event or reaches `max_seconds`.
 
 ## Request-driven skill loop
 
@@ -184,27 +223,6 @@ Enable it with:
   "execute_provider": true,
   "enable_model_tool_loop": true,
   "max_tool_rounds": 3
-}
-```
-
-Supported provider response shapes:
-
-```json
-{
-  "output": {
-    "raw_message": {
-      "tool_calls": [
-        {
-          "id": "call_1",
-          "type": "function",
-          "function": {
-            "name": "foundation.token_count",
-            "arguments": "{\"request\":{\"input\":[{\"type\":\"text\",\"text\":\"hello\"}]}}"
-          }
-        }
-      ]
-    }
-  }
 }
 ```
 
@@ -322,17 +340,17 @@ python agent/runtime.py \
 
 ## Current limitations
 
-- Event stream is JSONL-file backed, not SSE/WebSocket yet.
-- Local provider is text-only and loads model weights in-process.
+- SSE is implemented by polling the run-local JSONL event file.
 - Model-decided tool loop is synchronous.
 - Tool names must map to registered foundation skill ids.
 - Resume from existing run files is not implemented yet.
 - Database persistence is not implemented yet.
 - Approval resolution is not implemented yet.
+- WebSocket push is not implemented yet.
 
 ## Next steps
 
-- Add SSE endpoint for live run events.
 - Add resume/cancel/retry CLI commands.
 - Add provider usage reconciliation into the global usage ledger.
 - Add workspace-level budget and quota checks.
+- Add database-backed event store later.
