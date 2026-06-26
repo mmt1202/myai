@@ -189,6 +189,8 @@ components:
         privacy: {type: object, additionalProperties: true}
         max_sensitivity: {type: string}
         stream: {type: boolean, default: false}
+        stream_include_usage: {type: boolean, default: false}
+        stream_options: {type: object, additionalProperties: true}
         stream_chunk_chars: {type: integer, default: 128}
         force_chunked_stream: {type: boolean, default: false}
         tools: {type: array, items: {type: object, additionalProperties: true}}
@@ -225,6 +227,15 @@ components:
         route: {type: object, additionalProperties: true}
         created_at: {type: string}
       additionalProperties: true
+    ProviderToolCall:
+      type: object
+      properties:
+        index: {type: integer}
+        id: {type: string}
+        type: {type: string}
+        function: {type: object, additionalProperties: true}
+        arguments_json: true
+      additionalProperties: true
     ProviderStreamEvent:
       type: object
       properties:
@@ -232,7 +243,7 @@ components:
         created_at: {type: string}
         request_id: {type: [string, 'null']}
         trace_id: {type: [string, 'null']}
-        event_type: {type: string, enum: [provider_stream_started, provider_stream_delta, provider_stream_completed, provider_stream_failed]}
+        event_type: {type: string, enum: [provider_stream_started, provider_stream_delta, provider_stream_tool_call_delta, provider_stream_completed, provider_stream_failed]}
         index: {type: [integer, 'null']}
         model: {type: object, additionalProperties: true}
         delta: {type: [string, 'null']}
