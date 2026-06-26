@@ -210,8 +210,12 @@ Stream fields:
 - `stream`
 - `stream_chunk_chars`
 - `force_chunked_stream`
+- `stream_include_usage`
+- `stream_options`
 
 `/v1/chat` returns `text/event-stream` when `stream=true` and `execute_provider=true`.
+
+OpenAI-compatible provider streaming sends `stream=true` to `/chat/completions`, parses provider SSE `data: {...}` lines, stops on `data: [DONE]`, and converts text deltas into `ProviderStreamEvent` chunks.
 
 Provider stream event types:
 
@@ -274,9 +278,9 @@ Applications can use these capabilities later through the same routing and API l
 
 ## Next implementation step
 
-After local provider streaming output v1, continue with:
+After native OpenAI-compatible streaming v1, continue with:
 
-1. native OpenAI-compatible streaming
+1. streamed tool-call delta reconstruction
 2. provider usage reconciliation
 3. workspace-level budget and quota checks
 4. CI contract check
