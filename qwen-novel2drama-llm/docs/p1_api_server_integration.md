@@ -23,6 +23,27 @@ python inference/api_server.py --skip-model-load
 
 The second mode is useful for routing, token/cost, memory, rules, skills, MCP and agent API testing.
 
+## Auth mode
+
+Auth is disabled by default for local development.
+
+Enable API key enforcement:
+
+```bash
+FOUNDATION_AUTH_REQUIRED=true \
+FOUNDATION_API_KEYS=configs/auth/api_keys.json \
+python inference/api_server.py --skip-model-load
+```
+
+Use headers:
+
+```text
+X-API-Key: your_api_key
+X-Workspace-Id: your_workspace_id
+```
+
+`/health`, `/v1/health`, `/docs` and `/openapi.json` remain public.
+
 ## Legacy endpoint
 
 The old endpoint remains:
@@ -156,17 +177,17 @@ for the default JSONL memory store.
 
 ## Current limitations
 
-- Static OpenAPI contract still needs to be synchronized with the new helper routes.
 - Agent skill loop is synchronous and request-driven, not model-decided multi-turn tool calling yet.
 - Local provider adapter is not implemented yet.
 - No streaming API yet.
-- No authentication layer yet.
+- Auth is API-key based, not full OAuth/OIDC.
+- No rate limiting yet.
 - No database-backed memory or run store yet.
 
 ## Next steps
 
 - Add local provider adapter for the existing local runtime.
 - Add model-decided Agent tool loop.
-- Update static OpenAPI contract with all runtime helper routes.
-- Add authentication, workspace and API key scopes.
+- Add auth audit log and rate limiting.
+- Add workspace-level budget and quota checks.
 - Add streaming events.
