@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
 import sys
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INFERENCE_DIR = Path(__file__).resolve().parent
@@ -14,11 +17,12 @@ for path in [PROJECT_ROOT, INFERENCE_DIR]:
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from model_utils import generate_text, load_model, load_system_prompt
 from model_version_registry import resolve_model_paths
 from pydantic import BaseModel, Field
 
+from agent.events import read_agent_events, summarize_agent_events
 from agent.runtime import run_agent_once
 from inference.model_router import route_model
 from mcp.adapter import FoundationMCPAdapter
@@ -42,6 +46,7 @@ ACTIVE_MODEL_PATH: str | None = None
 MEMORY_STORE_PATH = PROJECT_ROOT / "outputs" / "memory" / "memory.jsonl"
 AGENT_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "agent_runtime" / "api"
 AUTH_AUDIT_PATH = PROJECT_ROOT / "outputs" / "auth" / "auth_audit.jsonl"
+TERMINAL_AGENT_EVENTS = {"run_completed", "run_failed", "run_cancelled", "run_waiting_approval"}
 
 
 class GenerateRequest(BaseModel):
@@ -90,6 +95,61 @@ def failed(body: dict[str, Any], code: str, message: str, **kwargs: Any) -> dict
         route=kwargs.get("route"),
         error={"code": code, "message": message, "retryable": False, "details": kwargs},
     )
+
+
+def safe_run_id(value: str | None) -> str:
+    run_id = str(value or "latest").strip()
+    if not run_id or "/" in run_id or "\\" in run_id or ".." in run_id:
+        raise HTTPException(status_code=400, detail="invalid run_id")
+    return run_id
+
+
+def agent_output_dir_for(body: dict[str, Any]) -> Path:
+    return AGENT_OUTPUT_DIR / safe_run_id(request_id(body) or body.get("run_id") or "latest")
+
+
+def agent_events_path(run_id: str | None) -> Path:
+    return AGENT_OUTPUT_DIR / safe_run_id(run_id) / "events.jsonl"
+
+
+def events_after(events: list[dict[str, Any]], since_event_id: str | None = None) -> list[dict[str, Any]]:
+    if not since_event_id:
+        return events
+    for index, event in enumerate(events):
+        if event.get("event_id") == since_event_id:
+            return events[index + 1 :]
+    return events
+
+
+def limited_events(events: list[dict[str, Any]], limit: int = 200) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return events
+    return events[-limit:]
+
+
+def sse_event(event: dict[str, Any]) -> str:
+    event_id = str(event.get("event_id") or "")
+    event_type = str(event.get("event_type") or "agent_event")
+    data = json.dumps(event, ensure_ascii=False, sort_keys=True)
+    return f"id: {event_id}\nevent: {event_type}\ndata: {data}\n\n"
+
+
+async def stream_agent_events(run_id: str, *, since_event_id: str | None = None, poll_interval: float = 1.0, max_seconds: int = 60, limit: int = 200) -> AsyncIterator[str]:
+    events_path = agent_events_path(run_id)
+    last_event_id = since_event_id
+    deadline = time.time() + max(1, max_seconds)
+    while True:
+        events = limited_events(events_after(read_agent_events(events_path), last_event_id), limit)
+        for event in events:
+            last_event_id = str(event.get("event_id") or last_event_id or "")
+            yield sse_event(event)
+            if event.get("event_type") in TERMINAL_AGENT_EVENTS:
+                return
+        if time.time() >= deadline:
+            yield ": stream_timeout\n\n"
+            return
+        yield ": heartbeat\n\n"
+        await asyncio.sleep(max(0.1, poll_interval))
 
 
 def client_host(request: Request) -> str | None:
@@ -197,7 +257,7 @@ def foundation_health() -> dict[str, Any]:
         "service": "myai-foundation",
         "model_version": ACTIVE_MODEL_VERSION,
         "model_path": ACTIVE_MODEL_PATH,
-        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "provider", "auth", "rate_limit", "audit"],
+        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "provider", "auth", "rate_limit", "audit"],
     }
 
 
@@ -303,8 +363,25 @@ def mcp_call_api(body: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/v1/agent/run")
 def agent_run_api(body: dict[str, Any]) -> dict[str, Any]:
-    run = run_agent_once(PROJECT_ROOT, body, AGENT_OUTPUT_DIR / (request_id(body) or "latest"))
+    run = run_agent_once(PROJECT_ROOT, body, agent_output_dir_for(body))
     return ok(body, {"run": run}, usage=run.get("usage"), cost=run.get("cost"), route=run.get("route_decision"))
+
+
+@app.get("/v1/agent/events")
+def agent_events_api(run_id: str = "latest", stream: bool = False, since_event_id: str | None = None, limit: int = 200, poll_interval: float = 1.0, max_seconds: int = 60) -> dict[str, Any] | StreamingResponse:
+    safe_id = safe_run_id(run_id)
+    if stream:
+        return StreamingResponse(
+            stream_agent_events(safe_id, since_event_id=since_event_id, poll_interval=poll_interval, max_seconds=max_seconds, limit=limit),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    events_path = agent_events_path(safe_id)
+    events = limited_events(events_after(read_agent_events(events_path), since_event_id), limit)
+    return ok(
+        {"request_id": safe_id},
+        {"run_id": safe_id, "events": events, "summary": summarize_agent_events(events), "events_path": str(events_path)},
+    )
 
 
 @app.post("/v1/chat")
