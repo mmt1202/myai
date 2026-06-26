@@ -1,0 +1,16 @@
+{
+  "rate_limit_name": "foundation_rate_limits_example_v1",
+  "default": {
+    "enabled": true,
+    "limit": 120,
+    "window_seconds": 60
+  },
+  "by_scope": {
+    "model:invoke": {"limit": 30, "window_seconds": 60},
+    "agent:run": {"limit": 20, "window_seconds": 60},
+    "memory:write": {"limit": 60, "window_seconds": 60}
+  },
+  "by_key_id": {
+    "dev-admin": {"limit": 600, "window_seconds": 60}
+  }
+}
