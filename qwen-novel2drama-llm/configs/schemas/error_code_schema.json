@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://myai.local/schemas/error_code_schema.json",
+  "title": "Foundation Error",
+  "type": "object",
+  "required": ["code", "message"],
+  "properties": {
+    "code": {
+      "type": "string",
+      "enum": [
+        "auth_required",
+        "permission_denied",
+        "invalid_request",
+        "schema_validation_failed",
+        "model_not_found",
+        "capability_not_found",
+        "router_no_candidate",
+        "provider_unavailable",
+        "provider_rate_limited",
+        "provider_error",
+        "context_window_exceeded",
+        "budget_exceeded",
+        "policy_denied",
+        "tool_denied",
+        "tool_failed",
+        "memory_denied",
+        "unsupported_media",
+        "unsafe_content",
+        "job_not_found",
+        "timeout",
+        "internal_error"
+      ]
+    },
+    "message": {"type": "string"},
+    "details": {"type": "object", "additionalProperties": true},
+    "retryable": {"type": "boolean", "default": false},
+    "provider": {"type": "string"},
+    "provider_error_code": {"type": "string"},
+    "trace_id": {"type": "string"},
+    "request_id": {"type": "string"}
+  },
+  "additionalProperties": false
+}
