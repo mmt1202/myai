@@ -134,6 +134,43 @@ class ProviderAdapterContractTests(unittest.TestCase):
         self.assertEqual(chunks[-1]["usage"]["total_tokens"], 3)
         self.assertEqual(chunks[-1]["output"]["finish_reason"], "stop")
 
+    def test_openai_tool_call_buffer_reconstructs_arguments(self) -> None:
+        provider = OpenAICompatibleProvider({"id": "m1", "model_name": "demo-model"})
+        buffer: dict[int, dict] = {}
+        provider.update_tool_call_buffer(buffer, {"index": 0, "id": "call_1", "type": "function", "function": {"name": "foundation."}})
+        provider.update_tool_call_buffer(buffer, {"index": 0, "function": {"name": "token_count", "arguments": "{\"request\":"}})
+        provider.update_tool_call_buffer(buffer, {"index": 0, "function": {"arguments": "{\"input\":[]}}"}})
+        tool_calls = provider.reconstructed_tool_calls(buffer)
+        self.assertEqual(tool_calls[0]["id"], "call_1")
+        self.assertEqual(tool_calls[0]["function"]["name"], "foundation.token_count")
+        self.assertEqual(tool_calls[0]["function"]["arguments"], '{"request":{"input":[]}}')
+        self.assertEqual(tool_calls[0]["arguments_json"], {"request": {"input": []}})
+
+    def test_openai_native_stream_reconstructs_tool_calls(self) -> None:
+        provider = OpenAICompatibleProvider({"id": "m1", "model_name": "demo-model"}, base_url="http://example.test/v1")
+        response = FakeSSEProviderResponse(
+            [
+                'data: {"id":"tc1","model":"demo-model","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"foundation."}}]},"finish_reason":null}]}\n',
+                'data: {"id":"tc2","model":"demo-model","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"token_count","arguments":"{\\\"request\\\":"}}]},"finish_reason":null}]}\n',
+                'data: {"id":"tc3","model":"demo-model","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\\"input\\\":[]}}"}}]},"finish_reason":null}]}\n',
+                'data: {"id":"tc4","model":"demo-model","choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}\n',
+                "data: [DONE]\n",
+            ]
+        )
+
+        with patch("providers.openai_compatible.urllib.request.urlopen", return_value=response):
+            chunks = list(provider.stream_generate({"request_id": "tools1", "input": [{"type": "text", "text": "hello"}], "tools": [{"type": "function", "function": {"name": "foundation.token_count"}}]}))
+        tool_delta_chunks = [chunk for chunk in chunks if chunk["event_type"] == "provider_stream_tool_call_delta"]
+        self.assertEqual(len(tool_delta_chunks), 3)
+        self.assertEqual(chunks[-1]["event_type"], "provider_stream_completed")
+        tool_calls = chunks[-1]["output"]["tool_calls"]
+        self.assertEqual(tool_calls[0]["id"], "call_1")
+        self.assertEqual(tool_calls[0]["function"]["name"], "foundation.token_count")
+        self.assertEqual(tool_calls[0]["function"]["arguments"], '{"request":{"input":[]}}')
+        self.assertEqual(tool_calls[0]["arguments_json"], {"request": {"input": []}})
+        self.assertEqual(chunks[-1]["output"]["finish_reason"], "tool_calls")
+        self.assertEqual(chunks[-1]["metadata"]["tool_call_count"], 1)
+
     def test_parse_chat_response(self) -> None:
         provider = OpenAICompatibleProvider({"id": "m1", "model_name": "demo-model"})
         result = provider.parse_chat_response(
