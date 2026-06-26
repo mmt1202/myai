@@ -5,8 +5,12 @@ This layer adds a lightweight but extensible authorization boundary for foundati
 Implemented files:
 
 - `services/auth.py`
+- `services/auth_audit.py`
+- `services/rate_limiter.py`
 - `configs/auth/api_keys.example.json`
+- `configs/auth/rate_limits.example.json`
 - `tests/test_auth_service.py`
+- `tests/test_auth_audit_rate_limit.py`
 - `inference/api_server.py`
 
 ## Default mode
@@ -100,6 +104,71 @@ Current endpoint scopes:
 
 The wildcard scope `*` grants all scopes.
 
+## Audit log
+
+The API middleware writes auth events to:
+
+```text
+outputs/auth/auth_audit.jsonl
+```
+
+Events include:
+
+- decision
+- key id
+- owner id
+- workspace id
+- required scope
+- method
+- path
+- status code
+- reason
+- client host
+
+Read or summarize the log:
+
+```bash
+python services/auth_audit.py --log outputs/auth/auth_audit.jsonl
+python services/auth_audit.py --log outputs/auth/auth_audit.jsonl --summary
+```
+
+## Rate limiting
+
+Rate limiting is disabled by default.
+
+Enable it with:
+
+```bash
+FOUNDATION_RATE_LIMIT_ENABLED=true
+FOUNDATION_RATE_LIMITS=configs/auth/rate_limits.json
+FOUNDATION_RATE_LIMIT_STATE=outputs/auth/rate_limit_state.json
+```
+
+Use `configs/auth/rate_limits.example.json` as a template.
+
+Example config:
+
+```json
+{
+  "default": {"enabled": true, "limit": 120, "window_seconds": 60},
+  "by_scope": {
+    "model:invoke": {"limit": 30, "window_seconds": 60}
+  },
+  "by_key_id": {
+    "dev-admin": {"limit": 600, "window_seconds": 60}
+  }
+}
+```
+
+When enabled, responses include rate limit headers:
+
+```text
+X-RateLimit-Limit
+X-RateLimit-Remaining
+X-RateLimit-Reset
+Retry-After
+```
+
 ## Public endpoints
 
 These endpoints do not require API keys even when auth is enabled:
@@ -113,8 +182,9 @@ These endpoints do not require API keys even when auth is enabled:
 
 - This is API key based auth, not full OAuth/OIDC.
 - Key store is file based.
+- Rate limit state is file based.
+- No distributed rate limiting yet.
 - No key rotation workflow yet.
-- No rate limiting yet.
 - No request body workspace binding yet.
 - No per-provider or per-model quota enforcement yet.
 
@@ -123,5 +193,5 @@ These endpoints do not require API keys even when auth is enabled:
 - Add API key generation and rotation helper.
 - Add workspace-level budget and quota checks.
 - Add request-body workspace binding.
-- Add rate limiting.
-- Add audit log events for auth decisions.
+- Add distributed rate limiting backend.
+- Add provider/model quota checks.
