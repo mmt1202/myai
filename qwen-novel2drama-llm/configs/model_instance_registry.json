@@ -15,6 +15,11 @@
       "context_window": 32768,
       "input_modalities": ["text"],
       "output_modalities": ["text"],
+      "runtime_config": {
+        "model_path_env": "FOUNDATION_LOCAL_MODEL_PATH",
+        "adapter_path_env": "FOUNDATION_LOCAL_ADAPTER_PATH",
+        "system_prompt_env": "FOUNDATION_LOCAL_SYSTEM_PROMPT"
+      },
       "cost": {"input_per_1m": 0, "output_per_1m": 0, "notes": "local compute cost not included"},
       "privacy": {"data_leaves_device": false, "zero_retention_supported": true},
       "region": "local",
