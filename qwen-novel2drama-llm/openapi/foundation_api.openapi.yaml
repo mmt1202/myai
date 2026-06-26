@@ -2,13 +2,24 @@ openapi: 3.1.0
 info:
   title: MyAI Foundation API
   version: 0.1.0
-  description: Deployable AI foundation API for text, reasoning, multimodal, token/cost, memory, rules, skills, MCP and agent orchestration.
+  description: Deployable AI foundation API for routing, chat, reasoning, multimodal analysis, token/cost, memory, rules, skills, MCP and agent orchestration.
 servers:
   - url: http://localhost:8000
 paths:
+  /v1/health:
+    get:
+      summary: Get foundation service health and runtime capabilities
+      operationId: getFoundationHealth
+      responses:
+        '200':
+          description: Foundation health response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
   /v1/chat:
     post:
-      summary: Unified text chat generation
+      summary: Unified text chat generation with route-first preflight
       operationId: createChat
       requestBody:
         required: true
@@ -18,7 +29,7 @@ paths:
               $ref: '#/components/schemas/FoundationRequest'
       responses:
         '200':
-          description: Chat response
+          description: Chat response or provider preflight result
           content:
             application/json:
               schema:
@@ -35,7 +46,7 @@ paths:
               $ref: '#/components/schemas/FoundationRequest'
       responses:
         '200':
-          description: Reasoning response
+          description: Reasoning response or provider preflight result
           content:
             application/json:
               schema:
@@ -52,7 +63,24 @@ paths:
               $ref: '#/components/schemas/FoundationRequest'
       responses:
         '200':
-          description: Multimodal analysis response
+          description: Multimodal analysis response or provider preflight result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FoundationResponse'
+  /v1/route:
+    post:
+      summary: Route a request to a model instance without executing a provider
+      operationId: routeModel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FoundationRequest'
+      responses:
+        '200':
+          description: Route decision
           content:
             application/json:
               schema:
@@ -117,7 +145,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MemoryRequest'
+              $ref: '#/components/schemas/MemoryWriteRequest'
       responses:
         '200':
           description: Memory write result
@@ -127,7 +155,7 @@ paths:
                 $ref: '#/components/schemas/FoundationResponse'
   /v1/rules/evaluate:
     post:
-      summary: Evaluate routing, budget, provider, region and tool rules
+      summary: Evaluate routing, budget, provider, memory and tool rules
       operationId: evaluateRules
       requestBody:
         required: true
@@ -144,8 +172,30 @@ paths:
                 $ref: '#/components/schemas/FoundationResponse'
   /v1/skills/list:
     get:
-      summary: List registered skills
+      summary: List registered foundation skills
       operationId: listSkills
+      parameters:
+        - in: query
+          name: category
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: capability
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: include_planned
+          required: false
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Skill list
@@ -155,14 +205,14 @@ paths:
                 $ref: '#/components/schemas/FoundationResponse'
   /v1/skills/call:
     post:
-      summary: Call a registered skill
+      summary: Call a registered skill with explicit permissions
       operationId: callSkill
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ToolLikeRequest'
+              $ref: '#/components/schemas/SkillCallRequest'
       responses:
         '200':
           description: Skill call result
@@ -172,8 +222,15 @@ paths:
                 $ref: '#/components/schemas/FoundationResponse'
   /v1/mcp/tools:
     get:
-      summary: List MCP tools/resources/prompts available through adapters
+      summary: List MCP-style tools exposed from foundation skills
       operationId: listMcpTools
+      parameters:
+        - in: query
+          name: include_planned
+          required: false
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: MCP tool list
@@ -181,9 +238,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FoundationResponse'
+  /v1/mcp/call:
+    post:
+      summary: Call an MCP-style tool through the foundation MCP adapter
+      operationId: callMcpTool
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpCallRequest'
+      responses:
+        '200':
+          description: MCP tool call result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FoundationResponse'
   /v1/agent/run:
     post:
-      summary: Start an agent run
+      summary: Run the foundation agent runtime
       operationId: runAgent
       requestBody:
         required: true
@@ -198,28 +272,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FoundationResponse'
-  /v1/jobs/{job_id}:
-    get:
-      summary: Get async job status
-      operationId: getJob
-      parameters:
-        - in: path
-          name: job_id
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Job status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FoundationResponse'
 components:
   schemas:
+    HealthResponse:
+      type: object
+      required: [status, service, capabilities]
+      properties:
+        status:
+          type: string
+        service:
+          type: string
+        model_version:
+          type:
+            - string
+            - 'null'
+        model_path:
+          type:
+            - string
+            - 'null'
+        capabilities:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
     FoundationRequest:
       type: object
-      required: [input]
       properties:
         request_id:
           type: string
@@ -236,6 +313,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ContentBlock'
+        task:
+          type: string
+        system:
+          type: string
+        developer:
+          type: string
+        model_id:
+          type: string
+        model:
+          type: string
+        execute_provider:
+          type: boolean
+          default: false
+        dry_run_provider:
+          type: boolean
+          default: false
+        base_url:
+          type: string
+        api_key_env:
+          type: string
+          default: MODEL_API_KEY
+        expected_output_tokens:
+          type: integer
+        expected_reasoning_tokens:
+          type: integer
+        max_output_tokens:
+          type: integer
+        temperature:
+          type: number
         memory:
           type: object
           additionalProperties: true
@@ -245,9 +351,22 @@ components:
         budget:
           type: object
           additionalProperties: true
+        privacy:
+          type: object
+          additionalProperties: true
+        max_sensitivity:
+          type: string
         stream:
           type: boolean
           default: false
+        tools:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        tool_choice:
+          type: object
+          additionalProperties: true
       additionalProperties: true
     ContentBlock:
       type: object
@@ -255,17 +374,26 @@ components:
       properties:
         type:
           type: string
+          enum: [text, image, video, audio, subtitle, metadata, file, url, tool_result, reasoning_hint]
         text:
           type: string
         uri:
           type: string
         file_id:
           type: string
+        filename:
+          type: string
         mime_type:
           type: string
         metadata:
           type: object
           additionalProperties: true
+        width:
+          type: integer
+        height:
+          type: integer
+        duration_ms:
+          type: integer
       additionalProperties: true
     FoundationResponse:
       type: object
@@ -277,7 +405,7 @@ components:
           type: string
         status:
           type: string
-          enum: [ok, queued, running, failed, cancelled]
+          enum: [ok, queued, running, waiting_tool, waiting_approval, failed, cancelled]
         model:
           type: object
           additionalProperties: true
@@ -295,50 +423,134 @@ components:
           items:
             type: string
         error:
+          type:
+            - object
+            - 'null'
+          additionalProperties: true
+        route:
           type: object
           additionalProperties: true
+        created_at:
+          type: string
       additionalProperties: true
     MemoryRequest:
       type: object
-      required: [scope]
       properties:
         scope:
           type: string
           enum: [session, user, project, task]
-        key:
+        owner_id:
+          type: string
+        project_id:
+          type: string
+        session_id:
+          type: string
+        task_id:
           type: string
         query:
           type: string
+        tags:
+          type: array
+          items:
+            type: string
+        max_sensitivity:
+          type: string
+        include_expired:
+          type: boolean
+        limit:
+          type: integer
+      additionalProperties: true
+    MemoryWriteRequest:
+      type: object
+      properties:
         item:
           type: object
           additionalProperties: true
       additionalProperties: true
     RuleRequest:
       type: object
-      required: [subject, action]
       properties:
-        subject:
-          type: string
-        action:
-          type: string
+        ruleset:
+          type: object
+          additionalProperties: true
         context:
           type: object
           additionalProperties: true
       additionalProperties: true
-    ToolLikeRequest:
+    SkillCallRequest:
       type: object
-      required: [name, arguments]
+      required: [name]
       properties:
         name:
           type: string
         arguments:
           type: object
           additionalProperties: true
+        allow_provider:
+          type: boolean
+          default: false
+        allow_write:
+          type: boolean
+          default: false
+        approved:
+          type: boolean
+          default: false
+      additionalProperties: true
+    McpCallRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        arguments:
+          type: object
+          additionalProperties: true
+        allow_provider:
+          type: boolean
+          default: false
+        allow_write:
+          type: boolean
+          default: false
+        approved:
+          type: boolean
+          default: false
+      additionalProperties: true
+    AgentSkillCall:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        skill_id:
+          type: string
+        arguments:
+          type: object
+          additionalProperties: true
+        allow_provider:
+          type: boolean
+          default: false
+        allow_write:
+          type: boolean
+          default: false
+        approved:
+          type: boolean
+          default: false
+        continue_on_error:
+          type: boolean
+          default: false
       additionalProperties: true
     AgentRunRequest:
       type: object
       required: [task]
       properties:
+        run_id:
+          type: string
+        session_id:
+          type: string
+        owner_id:
+          type: string
+        project_id:
+          type: string
         task:
           type: string
         input:
@@ -347,7 +559,38 @@ components:
             $ref: '#/components/schemas/ContentBlock'
         route_mode:
           type: string
+          enum: [smart, cheap, balanced, local_first, cloud_first, drama_specialist, code_specialist]
         approval_policy:
           type: string
           enum: [never, on_write, on_cost, always]
+        execute_provider:
+          type: boolean
+          default: false
+        dry_run_provider:
+          type: boolean
+          default: false
+        base_url:
+          type: string
+        api_key_env:
+          type: string
+          default: MODEL_API_KEY
+        skill_calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentSkillCall'
+        allow_skill_provider:
+          type: boolean
+          default: false
+        allow_skill_write:
+          type: boolean
+          default: false
+        approve_skills:
+          type: boolean
+          default: false
+        budget:
+          type: object
+          additionalProperties: true
+        privacy:
+          type: object
+          additionalProperties: true
       additionalProperties: true
