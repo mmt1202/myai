@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from agent.events import AgentEventWriter, read_agent_events, summarize_agent_events
 from agent.tool_loop import run_model_tool_loop
 from inference.model_router import route_model
 from providers.base import ProviderError
@@ -67,6 +68,7 @@ def create_run(request: dict[str, Any]) -> dict[str, Any]:
         "skill_results": [],
         "model_tool_loop": None,
         "provider_response": None,
+        "event_summary": {},
         "usage": {},
         "cost": {},
         "artifacts": {},
@@ -179,6 +181,9 @@ def build_provider_request(request: dict[str, Any], foundation_request: dict[str
     provider_request["model_path"] = request.get("model_path")
     provider_request["adapter_path"] = request.get("adapter_path")
     provider_request["system_prompt_file"] = request.get("system_prompt_file")
+    provider_request["use_cache"] = request.get("use_cache")
+    provider_request["disable_cache"] = request.get("disable_cache")
+    provider_request["serialize_generation"] = request.get("serialize_generation")
     return provider_request
 
 
@@ -215,7 +220,7 @@ def normalize_skill_call(call: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run_skill_loop(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any]) -> None:
+def run_skill_loop(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], events: AgentEventWriter | None = None) -> None:
     calls = request.get("skill_calls") or []
     if not calls:
         return
@@ -224,13 +229,17 @@ def run_skill_loop(project_root: Path, output_dir: Path, run: dict[str, Any], re
     default_allow_provider = bool(request.get("allow_skill_provider"))
     default_allow_write = bool(request.get("allow_skill_write"))
     default_approved = bool(request.get("approve_skills"))
-    add_step(run, "skill_loop_start", output_data={"skill_call_count": len(calls)})
+    step = add_step(run, "skill_loop_start", output_data={"skill_call_count": len(calls)})
+    if events:
+        events.emit("skill_loop_started", status="running", step=step, data={"skill_call_count": len(calls)})
     for raw_call in calls:
         call = normalize_skill_call(raw_call)
         allow_provider = default_allow_provider or call["allow_provider"]
         allow_write = default_allow_write or call["allow_write"]
         approved = default_approved or call["approved"]
         try:
+            if events:
+                events.emit("skill_call_started", status="running", data={"name": call["name"]})
             result = call_skill(
                 registry,
                 call["name"],
@@ -240,25 +249,33 @@ def run_skill_loop(project_root: Path, output_dir: Path, run: dict[str, Any], re
                 approved=approved,
             )
             results.append(result)
-            add_step(run, "skill_call", input_data={"name": call["name"], "permissions": {"allow_provider": allow_provider, "allow_write": allow_write, "approved": approved}}, output_data=result)
+            step = add_step(run, "skill_call", input_data={"name": call["name"], "permissions": {"allow_provider": allow_provider, "allow_write": allow_write, "approved": approved}}, output_data=result)
+            if events:
+                events.emit("skill_call_completed", status="completed", step=step, data={"name": call["name"], "result_status": result.get("status")})
         except Exception as exc:  # noqa: BLE001
             failure = {"skill_id": call["name"], "status": "failed", "error": str(exc)}
             results.append(failure)
-            add_step(run, "skill_call", status="failed", input_data={"name": call["name"]}, output_data=failure, error=str(exc))
+            step = add_step(run, "skill_call", status="failed", input_data={"name": call["name"]}, output_data=failure, error=str(exc))
+            if events:
+                events.emit("skill_call_failed", status="failed", step=step, data={"name": call["name"]}, error=str(exc))
             if not call["continue_on_error"]:
                 run["skill_results"] = results
                 save_json(output_dir / "skill_results.json", {"results": results})
                 raise SkillError(str(exc)) from exc
     run["skill_results"] = results
     save_json(output_dir / "skill_results.json", {"results": results})
-    add_step(run, "skill_loop_completed", output_data={"skill_result_count": len(results)})
+    step = add_step(run, "skill_loop_completed", output_data={"skill_result_count": len(results)})
+    if events:
+        events.emit("skill_loop_completed", status="completed", step=step, data={"skill_result_count": len(results)})
 
 
-def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any]) -> dict[str, Any]:
+def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any], events: AgentEventWriter | None = None) -> dict[str, Any]:
     selected_model_id = route_decision.get("selected_model_id")
     if not selected_model_id:
         raise ProviderError("model_not_found", "selected model id is missing")
     provider_request = build_provider_request(request, foundation_request, selected_model_id)
+    if events:
+        events.emit("provider_started", status="running", data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run")})
     response = generate_with_registry(
         provider_request,
         instances,
@@ -273,19 +290,25 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
         run["cost"] = response["cost"]
     save_json(output_dir / "provider_response.json", response)
     record_usage(output_dir, run, provider_response=response)
-    add_step(run, "provider_generate", input_data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run")}, output_data=response, status="completed" if response.get("status") == "ok" else "failed")
+    step = add_step(run, "provider_generate", input_data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run")}, output_data=response, status="completed" if response.get("status") == "ok" else "failed")
     if response.get("status") != "ok":
+        if events:
+            events.emit("provider_failed", status="failed", step=step, data={"model_id": selected_model_id}, error="provider response was not ok")
         raise ProviderError("provider_error", "provider response was not ok", details=response)
+    if events:
+        events.emit("provider_completed", status="completed", step=step, data={"model_id": selected_model_id, "usage": response.get("usage") or {}, "cost": response.get("cost") or {}})
     return response
 
 
-def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any], provider_response: dict[str, Any]) -> None:
+def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any], provider_response: dict[str, Any], events: AgentEventWriter | None = None) -> None:
     if not request.get("enable_model_tool_loop"):
         return
     selected_model_id = route_decision.get("selected_model_id")
     if not selected_model_id:
         return
     max_rounds = int(request.get("max_tool_rounds") or 3)
+    if events:
+        events.emit("model_tool_loop_started", status="running", data={"model_id": selected_model_id, "max_rounds": max_rounds})
     summary = run_model_tool_loop(
         project_root=project_root,
         output_dir=output_dir,
@@ -303,76 +326,19 @@ def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[st
         run["usage"] = run["provider_response"]["usage"]
     if (run.get("provider_response") or {}).get("cost"):
         run["cost"] = run["provider_response"]["cost"]
-    add_step(run, "model_tool_loop", status="completed" if summary.get("status") == "ok" else "failed", output_data={"status": summary.get("status"), "round_count": summary.get("round_count", len(summary.get("rounds", []))), "error": summary.get("error")})
+    step = add_step(run, "model_tool_loop", status="completed" if summary.get("status") == "ok" else "failed", output_data={"status": summary.get("status"), "round_count": summary.get("round_count", len(summary.get("rounds", []))), "error": summary.get("error")})
     if summary.get("status") != "ok":
+        if events:
+            events.emit("model_tool_loop_failed", status="failed", step=step, data={"round_count": summary.get("round_count", len(summary.get("rounds", [])))}, error=str(summary.get("error") or "model tool loop failed"))
         raise SkillError(str(summary.get("error") or "model tool loop failed"))
+    if events:
+        events.emit("model_tool_loop_completed", status="completed", step=step, data={"round_count": summary.get("round_count", len(summary.get("rounds", [])))})
 
 
-def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path, instances_path: Path | None = None, rules_path: Path | None = None) -> dict[str, Any]:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    run = create_run(request)
-    save_json(output_dir / "agent_run_created.json", run)
-    transition(run, "running")
-    add_step(run, "start", output_data={"status": "running"})
-
-    foundation_request = build_foundation_request({**run, **request})
-    instances = load_json(instances_path or project_root / "configs" / "model_instance_registry.json")
-    route_decision = route_model(foundation_request, instances)
-    run["route_decision"] = route_decision
-    run["usage"] = route_decision.get("estimated_usage") or {}
-    if route_decision.get("selected"):
-        run["cost"] = (route_decision["selected"].get("estimated_cost") or {})
-    add_step(run, "route_model", input_data=foundation_request, output_data=route_decision, status="completed" if route_decision.get("status") == "routed" else "failed")
-
-    if route_decision.get("status") != "routed":
-        run["error"] = "router_no_candidate"
-        transition(run, "failed")
-        save_json(output_dir / "agent_run_report.json", run)
-        return run
-
-    ruleset = load_rules(rules_path or project_root / "configs" / "rules" / "default_rules.yaml")
-    rule_context = rule_context_from_route(foundation_request, route_decision, instances)
-    rule_decision = evaluate_rules(ruleset, rule_context)
-    run["rule_decision"] = rule_decision
-    add_step(run, "evaluate_rules", input_data=rule_context, output_data=rule_decision)
-
-    if rule_decision.get("decision") == "deny":
-        run["error"] = "policy_denied"
-        record_usage(output_dir, run)
-        transition(run, "failed")
-    elif approval_required(run, rule_decision, route_decision):
-        add_step(run, "approval_gate", status="waiting_approval", output_data={"reason": "approval_required"})
-        record_usage(output_dir, run)
-        transition(run, "waiting_approval")
-    else:
-        try:
-            run_skill_loop(project_root, output_dir, run, request)
-        except SkillError as exc:
-            run["error"] = "skill_failed"
-            add_step(run, "skill_loop_error", status="failed", output_data={"message": str(exc)}, error=str(exc))
-            record_usage(output_dir, run)
-            transition(run, "failed")
-        else:
-            if request.get("execute_provider"):
-                try:
-                    provider_response = run_provider_step(project_root, output_dir, run, request, foundation_request, route_decision, instances)
-                    maybe_run_model_tool_loop(project_root, output_dir, run, request, foundation_request, route_decision, instances, provider_response)
-                    transition(run, "completed")
-                except SkillError as exc:
-                    run["error"] = "model_tool_loop_failed"
-                    add_step(run, "model_tool_loop_error", status="failed", output_data={"message": str(exc)}, error=str(exc))
-                    transition(run, "failed")
-                except ProviderError as exc:
-                    run["error"] = exc.code
-                    add_step(run, "provider_error", status="failed", output_data={"code": exc.code, "message": exc.message, "details": exc.details}, error=exc.message)
-                    transition(run, "failed")
-            else:
-                add_step(run, "ready_for_provider", output_data={"selected_model_id": route_decision.get("selected_model_id"), "provider_execution": "skipped"})
-                record_usage(output_dir, run)
-                transition(run, "completed")
-
+def attach_artifacts(output_dir: Path, run: dict[str, Any]) -> None:
     run["artifacts"] = {
         "report": str(output_dir / "agent_run_report.json"),
+        "events": str(output_dir / "events.jsonl"),
         "usage_ledger": str(output_dir / "usage_ledger.jsonl"),
     }
     if run.get("provider_response"):
@@ -381,6 +347,99 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
         run["artifacts"]["skill_results"] = str(output_dir / "skill_results.json")
     if run.get("model_tool_loop"):
         run["artifacts"]["model_tool_loop"] = str(output_dir / "model_tool_loop.json")
+
+
+def finalize_events(output_dir: Path, run: dict[str, Any]) -> None:
+    events = read_agent_events(output_dir / "events.jsonl")
+    run["event_summary"] = summarize_agent_events(events)
+
+
+def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path, instances_path: Path | None = None, rules_path: Path | None = None) -> dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    run = create_run(request)
+    events = AgentEventWriter(output_dir / "events.jsonl", run, enabled=not bool(request.get("disable_events")))
+    events.emit("run_created", status="queued", data={"task": run.get("task"), "route_mode": run.get("route_mode")})
+    save_json(output_dir / "agent_run_created.json", run)
+    transition(run, "running")
+    step = add_step(run, "start", output_data={"status": "running"})
+    events.emit("run_started", status="running", step=step)
+
+    foundation_request = build_foundation_request({**run, **request})
+    instances = load_json(instances_path or project_root / "configs" / "model_instance_registry.json")
+    events.emit("route_started", status="running", data={"route_mode": foundation_request.get("route_mode"), "required_capabilities": foundation_request.get("required_capabilities")})
+    route_decision = route_model(foundation_request, instances)
+    run["route_decision"] = route_decision
+    run["usage"] = route_decision.get("estimated_usage") or {}
+    if route_decision.get("selected"):
+        run["cost"] = (route_decision["selected"].get("estimated_cost") or {})
+    step = add_step(run, "route_model", input_data=foundation_request, output_data=route_decision, status="completed" if route_decision.get("status") == "routed" else "failed")
+    events.emit("route_completed" if route_decision.get("status") == "routed" else "route_failed", status=step["status"], step=step, data={"selected_model_id": route_decision.get("selected_model_id"), "route_status": route_decision.get("status")})
+
+    if route_decision.get("status") != "routed":
+        run["error"] = "router_no_candidate"
+        transition(run, "failed")
+        events.emit("run_failed", status="failed", message="router_no_candidate", error="router_no_candidate")
+        attach_artifacts(output_dir, run)
+        finalize_events(output_dir, run)
+        save_json(output_dir / "agent_run_report.json", run)
+        return run
+
+    ruleset = load_rules(rules_path or project_root / "configs" / "rules" / "default_rules.yaml")
+    rule_context = rule_context_from_route(foundation_request, route_decision, instances)
+    events.emit("rules_started", status="running")
+    rule_decision = evaluate_rules(ruleset, rule_context)
+    run["rule_decision"] = rule_decision
+    step = add_step(run, "evaluate_rules", input_data=rule_context, output_data=rule_decision)
+    events.emit("rules_completed", status="completed", step=step, data={"decision": rule_decision.get("decision"), "matched_rule_count": len(rule_decision.get("matched_rules") or [])})
+
+    if rule_decision.get("decision") == "deny":
+        run["error"] = "policy_denied"
+        record_usage(output_dir, run)
+        transition(run, "failed")
+        events.emit("run_failed", status="failed", message="policy_denied", error="policy_denied")
+    elif approval_required(run, rule_decision, route_decision):
+        step = add_step(run, "approval_gate", status="waiting_approval", output_data={"reason": "approval_required"})
+        record_usage(output_dir, run)
+        transition(run, "waiting_approval")
+        events.emit("run_waiting_approval", status="waiting_approval", step=step, message="approval_required")
+    else:
+        try:
+            run_skill_loop(project_root, output_dir, run, request, events)
+        except SkillError as exc:
+            run["error"] = "skill_failed"
+            step = add_step(run, "skill_loop_error", status="failed", output_data={"message": str(exc)}, error=str(exc))
+            events.emit("skill_loop_failed", status="failed", step=step, error=str(exc))
+            record_usage(output_dir, run)
+            transition(run, "failed")
+            events.emit("run_failed", status="failed", message="skill_failed", error=str(exc))
+        else:
+            if request.get("execute_provider"):
+                try:
+                    provider_response = run_provider_step(project_root, output_dir, run, request, foundation_request, route_decision, instances, events)
+                    maybe_run_model_tool_loop(project_root, output_dir, run, request, foundation_request, route_decision, instances, provider_response, events)
+                    transition(run, "completed")
+                    events.emit("run_completed", status="completed", data={"usage": run.get("usage") or {}, "cost": run.get("cost") or {}})
+                except SkillError as exc:
+                    run["error"] = "model_tool_loop_failed"
+                    step = add_step(run, "model_tool_loop_error", status="failed", output_data={"message": str(exc)}, error=str(exc))
+                    events.emit("model_tool_loop_failed", status="failed", step=step, error=str(exc))
+                    transition(run, "failed")
+                    events.emit("run_failed", status="failed", message="model_tool_loop_failed", error=str(exc))
+                except ProviderError as exc:
+                    run["error"] = exc.code
+                    step = add_step(run, "provider_error", status="failed", output_data={"code": exc.code, "message": exc.message, "details": exc.details}, error=exc.message)
+                    events.emit("provider_failed", status="failed", step=step, error=exc.message, data={"code": exc.code, "details": exc.details})
+                    transition(run, "failed")
+                    events.emit("run_failed", status="failed", message=exc.code, error=exc.message)
+            else:
+                step = add_step(run, "ready_for_provider", output_data={"selected_model_id": route_decision.get("selected_model_id"), "provider_execution": "skipped"})
+                events.emit("provider_skipped", status="completed", step=step, data={"selected_model_id": route_decision.get("selected_model_id")})
+                record_usage(output_dir, run)
+                transition(run, "completed")
+                events.emit("run_completed", status="completed", data={"usage": run.get("usage") or {}, "cost": run.get("cost") or {}})
+
+    attach_artifacts(output_dir, run)
+    finalize_events(output_dir, run)
     save_json(output_dir / "agent_run_report.json", run)
     return run
 
@@ -404,6 +463,7 @@ def main() -> int:
     parser.add_argument("--allow-model-tool-provider", action="store_true")
     parser.add_argument("--allow-model-tool-write", action="store_true")
     parser.add_argument("--approve-model-tools", action="store_true")
+    parser.add_argument("--disable-events", action="store_true")
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
     request = load_json(Path(args.request))
@@ -431,6 +491,8 @@ def main() -> int:
         request["allow_model_tool_write"] = True
     if args.approve_model_tools:
         request["approve_model_tools"] = True
+    if args.disable_events:
+        request["disable_events"] = True
     run = run_agent_once(
         project_root=project_root,
         request=request,
