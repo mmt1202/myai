@@ -25,6 +25,7 @@ REQUIRED_RUNTIME_ENDPOINTS = {
     "/v1/mcp/tools",
     "/v1/mcp/call",
     "/v1/agent/run",
+    "/v1/agent/events",
 }
 
 REQUIRED_OPENAPI_TOKENS = {
@@ -37,6 +38,8 @@ REQUIRED_OPENAPI_TOKENS = {
     "FoundationResponse:",
     "AgentRunRequest:",
     "AgentSkillCall:",
+    "AgentEvent:",
+    "AgentEventsResponse:",
     "execute_provider:",
     "dry_run_provider:",
     "skill_calls:",
@@ -46,6 +49,7 @@ REQUIRED_OPENAPI_TOKENS = {
     "allow_model_tool_write:",
     "approve_model_tools:",
     "fail_on_model_tool_error:",
+    "disable_events:",
 }
 
 DISALLOWED_OPENAPI_ENDPOINTS = {
