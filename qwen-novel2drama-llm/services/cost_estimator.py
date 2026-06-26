@@ -5,7 +5,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from token_counter import estimate_request_usage
+try:
+    from services.token_counter import estimate_request_usage
+except ImportError:  # pragma: no cover - supports direct script execution from services/
+    from token_counter import estimate_request_usage
 
 
 def load_json(path: Path) -> dict[str, Any]:
