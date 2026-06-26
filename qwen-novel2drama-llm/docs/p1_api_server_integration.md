@@ -90,6 +90,37 @@ To call a provider adapter, pass:
 
 This keeps routing and cost preflight safe by default.
 
+## Local provider execution
+
+The local model instance `local.qwen2_5_1_5b_instruct` now uses `providers/local_text.py` through the provider factory.
+
+Local provider dry-run does not load model weights:
+
+```json
+{
+  "route_mode": "local_first",
+  "execute_provider": true,
+  "dry_run_provider": true,
+  "input": [{"type": "text", "text": "hello"}]
+}
+```
+
+Real local execution needs a model path:
+
+```bash
+FOUNDATION_LOCAL_MODEL_PATH=/path/to/model python inference/api_server.py --skip-model-load
+```
+
+or a request field:
+
+```json
+{
+  "execute_provider": true,
+  "model_path": "/path/to/model",
+  "input": [{"type": "text", "text": "hello"}]
+}
+```
+
 ## Agent provider execution and skill loop
 
 `/v1/agent/run` supports provider execution and registered skill calls through `agent/runtime.py`.
@@ -178,7 +209,7 @@ for the default JSONL memory store.
 ## Current limitations
 
 - Agent skill loop is synchronous and request-driven, not model-decided multi-turn tool calling yet.
-- Local provider adapter is not implemented yet.
+- Local provider is text-only and loads weights in-process.
 - No streaming API yet.
 - Auth is API-key based, not full OAuth/OIDC.
 - No rate limiting yet.
@@ -186,8 +217,8 @@ for the default JSONL memory store.
 
 ## Next steps
 
-- Add local provider adapter for the existing local runtime.
 - Add model-decided Agent tool loop.
+- Add local provider concurrency controls.
 - Add auth audit log and rate limiting.
 - Add workspace-level budget and quota checks.
 - Add streaming events.
