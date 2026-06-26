@@ -1,0 +1,1 @@
+"""Foundation provider adapter modules."""
