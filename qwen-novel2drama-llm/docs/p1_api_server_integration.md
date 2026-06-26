@@ -68,17 +68,9 @@ X-RateLimit-Remaining
 X-RateLimit-Reset
 ```
 
-## Legacy endpoint
-
-The old endpoint remains:
-
-- `POST /generate`
-
-It still requires a loaded local model.
-
 ## Foundation endpoints
 
-New endpoints:
+Runtime endpoints:
 
 - `GET /v1/health`
 - `POST /v1/chat`
@@ -95,6 +87,9 @@ New endpoints:
 - `GET /v1/mcp/tools`
 - `POST /v1/mcp/call`
 - `POST /v1/agent/run`
+- `GET /v1/agent/events`
+
+The legacy `POST /generate` endpoint remains and still requires a loaded local model.
 
 ## Chat and provider execution
 
@@ -112,11 +107,9 @@ To call a provider adapter, pass:
 }
 ```
 
-This keeps routing and cost preflight safe by default.
-
 ## Local provider execution
 
-The local model instance `local.qwen2_5_1_5b_instruct` now uses `providers/local_text.py` through the provider factory.
+The local model instance `local.qwen2_5_1_5b_instruct` uses `providers/local_text.py` through the provider factory.
 
 Local provider dry-run does not load model weights:
 
@@ -155,14 +148,15 @@ Local provider cache and concurrency controls:
 - `providers.local_text.cache_stats()`: inspect process-local cache state.
 - `providers.local_text.clear_model_cache()`: clear process-local cache state.
 
-## Agent provider execution, tool loops and event stream
+## Agent provider execution, tool loops and live events
 
-`/v1/agent/run` supports provider execution, request-defined skill calls, model-decided tool calls and file-backed run events through `agent/runtime.py`.
+`/v1/agent/run` supports provider execution, request-defined skill calls, model-decided tool calls and run events through `agent/runtime.py`.
 
 Provider preflight only:
 
 ```json
 {
+  "run_id": "demo-run",
   "task": "summarize this",
   "route_mode": "smart",
   "approval_policy": "never"
@@ -173,6 +167,7 @@ Provider dry-run execution:
 
 ```json
 {
+  "run_id": "demo-run",
   "task": "summarize this",
   "route_mode": "smart",
   "approval_policy": "never",
@@ -218,16 +213,40 @@ Model-decided tool loop execution:
 
 Model-decided tool calls must use registered foundation skill ids as tool names. Tool results are appended as `tool_result` content blocks and sent back to the provider in the next round.
 
-Agent event stream:
+Agent events are written to:
 
 ```text
-outputs/agent_runtime/api/<request_id-or-latest>/events.jsonl
+outputs/agent_runtime/api/<request_id-or-run_id-or-latest>/events.jsonl
 ```
 
-The run report includes:
+Read events as JSON:
 
-- `artifacts.events`
-- `event_summary`
+```text
+GET /v1/agent/events?run_id=demo-run
+```
+
+Stream events as SSE:
+
+```text
+GET /v1/agent/events?run_id=demo-run&stream=true
+```
+
+Supported event query parameters:
+
+- `run_id`
+- `stream`
+- `since_event_id`
+- `limit`
+- `poll_interval`
+- `max_seconds`
+
+SSE response frames use:
+
+```text
+id: <event_id>
+event: <event_type>
+data: <full event JSON>
+```
 
 Disable event writing per request:
 
@@ -237,23 +256,10 @@ Disable event writing per request:
 }
 ```
 
-Skill permission flags can be supplied per request-driven skill call or as request-level defaults:
-
-- `allow_skill_provider`
-- `allow_skill_write`
-- `approve_skills`
-
-Model tool-loop permission flags:
-
-- `allow_model_tool_provider`
-- `allow_model_tool_write`
-- `approve_model_tools`
-- `fail_on_model_tool_error`
-
 The agent writes run artifacts under:
 
 ```text
-outputs/agent_runtime/api/<request_id-or-latest>/
+outputs/agent_runtime/api/<request_id-or-run_id-or-latest>/
 ```
 
 Artifacts can include:
@@ -287,19 +293,19 @@ for the default JSONL memory store.
 
 ## Current limitations
 
-- Agent event stream is file-backed JSONL, not SSE/WebSocket yet.
+- Agent SSE currently polls the JSONL event file.
 - Model-decided tool loop is synchronous.
 - Tool names must map to registered foundation skill ids.
 - Local provider is text-only and loads weights in-process.
 - Local provider cache is process-local.
-- No streaming API yet.
 - Auth is API-key based, not full OAuth/OIDC.
 - Rate limit state is file based, not distributed.
 - No database-backed memory or run store yet.
+- WebSocket events are not implemented yet.
 
 ## Next steps
 
-- Add SSE endpoint for live Agent events.
 - Add local provider streaming support.
 - Add workspace-level budget and quota checks.
 - Add distributed rate limiting backend.
+- Add resume/cancel/retry for Agent runs.
