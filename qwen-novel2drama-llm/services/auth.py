@@ -132,11 +132,14 @@ def build_auth_context(
     auth_required: bool,
 ) -> dict[str, Any]:
     required_scope = required_scope_for(method, path)
+    if required_scope is None:
+        return {**anonymous_context(), "required_scope": required_scope, "auth_required": auth_required, "public": True}
     if not auth_required and not api_key:
-        return {**anonymous_context(), "required_scope": required_scope, "auth_required": False}
+        return {**anonymous_context(), "required_scope": required_scope, "auth_required": False, "public": False}
     context = authorize_api_key(store, api_key, required_scope=required_scope, workspace_id=workspace_id)
     context["required_scope"] = required_scope
     context["auth_required"] = auth_required
+    context["public"] = False
     return context
 
 
