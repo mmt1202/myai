@@ -155,9 +155,9 @@ Local provider cache and concurrency controls:
 - `providers.local_text.cache_stats()`: inspect process-local cache state.
 - `providers.local_text.clear_model_cache()`: clear process-local cache state.
 
-## Agent provider execution and tool loops
+## Agent provider execution, tool loops and event stream
 
-`/v1/agent/run` supports provider execution, request-defined skill calls, and model-decided tool calls through `agent/runtime.py`.
+`/v1/agent/run` supports provider execution, request-defined skill calls, model-decided tool calls and file-backed run events through `agent/runtime.py`.
 
 Provider preflight only:
 
@@ -218,6 +218,25 @@ Model-decided tool loop execution:
 
 Model-decided tool calls must use registered foundation skill ids as tool names. Tool results are appended as `tool_result` content blocks and sent back to the provider in the next round.
 
+Agent event stream:
+
+```text
+outputs/agent_runtime/api/<request_id-or-latest>/events.jsonl
+```
+
+The run report includes:
+
+- `artifacts.events`
+- `event_summary`
+
+Disable event writing per request:
+
+```json
+{
+  "disable_events": true
+}
+```
+
 Skill permission flags can be supplied per request-driven skill call or as request-level defaults:
 
 - `allow_skill_provider`
@@ -240,6 +259,7 @@ outputs/agent_runtime/api/<request_id-or-latest>/
 Artifacts can include:
 
 - `agent_run_report.json`
+- `events.jsonl`
 - `provider_response.json`
 - `skill_results.json`
 - `model_tool_loop.json`
@@ -267,6 +287,7 @@ for the default JSONL memory store.
 
 ## Current limitations
 
+- Agent event stream is file-backed JSONL, not SSE/WebSocket yet.
 - Model-decided tool loop is synchronous.
 - Tool names must map to registered foundation skill ids.
 - Local provider is text-only and loads weights in-process.
@@ -278,7 +299,7 @@ for the default JSONL memory store.
 
 ## Next steps
 
+- Add SSE endpoint for live Agent events.
 - Add local provider streaming support.
 - Add workspace-level budget and quota checks.
 - Add distributed rate limiting backend.
-- Add streaming events.
