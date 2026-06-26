@@ -1,0 +1,1 @@
+"""Foundation skills registry modules."""
