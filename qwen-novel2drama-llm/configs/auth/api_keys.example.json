@@ -1,0 +1,26 @@
+{
+  "auth_name": "foundation_api_keys_example_v1",
+  "hash_algorithm": "sha256",
+  "keys": [
+    {
+      "key_id": "dev-admin",
+      "name": "Development Admin Key",
+      "sha256": "replace_with_sha256_of_real_api_key",
+      "status": "active",
+      "owner_id": "dev-user",
+      "workspaces": ["*"],
+      "scopes": ["*"],
+      "metadata": {"environment": "development"}
+    },
+    {
+      "key_id": "readonly-demo",
+      "name": "Read-only Demo Key",
+      "sha256": "replace_with_sha256_of_readonly_api_key",
+      "status": "active",
+      "owner_id": "demo-user",
+      "workspaces": ["demo-workspace"],
+      "scopes": ["foundation:read", "skills:read", "mcp:read"],
+      "metadata": {"environment": "development"}
+    }
+  ]
+}
