@@ -94,12 +94,12 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertTrue((Path(tmpdir) / "provider_response.json").exists())
             self.assertTrue((Path(tmpdir) / "usage_ledger.jsonl").exists())
 
-    def test_run_agent_provider_failure_is_failed_status(self) -> None:
+    def test_run_agent_local_provider_dry_run_succeeds(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
             run = run_agent_once(
                 project_root=PROJECT_ROOT,
                 request={
-                    "task": "local provider unsupported",
+                    "task": "local provider dry run",
                     "route_mode": "balanced",
                     "privacy": {"local_only": True},
                     "approval_policy": "never",
@@ -108,8 +108,9 @@ class AgentRuntimeTests(unittest.TestCase):
                 },
                 output_dir=Path(tmpdir),
             )
-            self.assertEqual(run["status"], "failed")
-            self.assertEqual(run["error"], "provider_not_supported")
+            self.assertEqual(run["status"], "completed")
+            self.assertEqual(run["provider_response"]["model"]["provider"], "local")
+            self.assertTrue(run["provider_response"]["output"]["dry_run"])
 
     def test_run_agent_executes_safe_skill_loop(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
