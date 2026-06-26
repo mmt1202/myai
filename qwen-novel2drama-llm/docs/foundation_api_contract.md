@@ -215,14 +215,23 @@ Stream fields:
 
 `/v1/chat` returns `text/event-stream` when `stream=true` and `execute_provider=true`.
 
-OpenAI-compatible provider streaming sends `stream=true` to `/chat/completions`, parses provider SSE `data: {...}` lines, stops on `data: [DONE]`, and converts text deltas into `ProviderStreamEvent` chunks.
+OpenAI-compatible provider streaming sends `stream=true` to `/chat/completions`, parses provider SSE `data: {...}` lines, stops on `data: [DONE]`, and converts text/tool-call deltas into `ProviderStreamEvent` chunks.
 
 Provider stream event types:
 
 - `provider_stream_started`
 - `provider_stream_delta`
+- `provider_stream_tool_call_delta`
 - `provider_stream_completed`
 - `provider_stream_failed`
+
+Streamed tool calls are reconstructed by `index` and returned under:
+
+```text
+provider_stream_completed.output.tool_calls
+```
+
+The provider adapter reconstructs tool calls but does not execute them.
 
 The default is route/cost preflight only.
 
@@ -278,9 +287,9 @@ Applications can use these capabilities later through the same routing and API l
 
 ## Next implementation step
 
-After native OpenAI-compatible streaming v1, continue with:
+After streamed tool-call delta reconstruction v1, continue with:
 
-1. streamed tool-call delta reconstruction
+1. bridge streamed provider tool calls into Agent tool-loop execution
 2. provider usage reconciliation
 3. workspace-level budget and quota checks
 4. CI contract check
