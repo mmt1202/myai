@@ -71,11 +71,43 @@ It can:
 - build `/chat/completions` payloads
 - pass tools and tool choice when provided
 - run in dry-run mode without network calls
+- support `dry_run_provider` as a provider-level dry-run alias
 - normalize provider usage into foundation usage fields
 - return standard response envelopes
 - normalize HTTP and connection errors
+- send native `stream=true` chat completions requests
+- parse provider SSE `data: {...}` lines
+- stop on `data: [DONE]`
+- convert remote deltas to `ProviderStreamEvent` chunks
+- include final streamed text and usage in `provider_stream_completed`
 
-Current streaming behavior for this adapter uses the base fallback stream wrapper unless a provider-specific streaming implementation is added later.
+Native OpenAI-compatible streaming through CLI:
+
+```bash
+MODEL_API_KEY=your_key python providers/openai_compatible.py \
+  --request examples/provider_request.json \
+  --base-url https://provider.example/v1 \
+  --stream
+```
+
+Optional stream usage request:
+
+```json
+{
+  "stream": true,
+  "stream_include_usage": true
+}
+```
+
+This sets:
+
+```json
+{
+  "stream_options": {"include_usage": true}
+}
+```
+
+when building the OpenAI-compatible payload.
 
 ## Local text provider
 
@@ -183,6 +215,14 @@ Request field:
 }
 ```
 
+Provider-level dry-run alias:
+
+```json
+{
+  "dry_run_provider": true
+}
+```
+
 ## Real provider call
 
 OpenAI-compatible:
@@ -191,6 +231,17 @@ OpenAI-compatible:
 MODEL_API_KEY=your_key python providers/openai_compatible.py \
   --request examples/provider_request.json \
   --base-url https://provider.example/v1
+```
+
+OpenAI-compatible streaming:
+
+```bash
+MODEL_API_KEY=your_key python providers/factory.py \
+  --request examples/provider_request.json \
+  --instances configs/model_instance_registry.json \
+  --model-id external.openai_compatible.smart \
+  --base-url https://provider.example/v1 \
+  --stream
 ```
 
 Local transformers:
@@ -218,14 +269,14 @@ FOUNDATION_LOCAL_MODEL_PATH=/path/to/model python providers/factory.py \
 - Local provider loads model weights in-process.
 - Local cache is process-local, not distributed.
 - Generation serialization is per-process, not cluster-wide.
-- OpenAI-compatible adapter does not yet perform native remote streaming; it uses fallback full-response chunking.
+- OpenAI-compatible streaming currently handles text deltas; streamed tool-call delta reconstruction is not implemented yet.
 - Image/video/audio generation adapters are not implemented yet.
 - Provider-specific tokenizer reconciliation is not implemented yet.
 - Provider health probing is still basic.
 
 ## Next steps
 
-- Add native OpenAI-compatible streaming.
+- Add streamed tool-call delta reconstruction.
 - Add provider usage reconciliation after provider calls.
 - Add local provider warmup endpoint.
 - Add local provider memory-pressure eviction policy.
