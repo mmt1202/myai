@@ -1,0 +1,177 @@
+{
+  "registry_name": "model_capability_registry_v1",
+  "principle": "Capabilities are abstract abilities. Model instances implement capabilities with different quality, cost, latency and safety constraints.",
+  "capabilities": [
+    {
+      "id": "text.chat",
+      "name": "通用对话",
+      "domain": "general",
+      "modalities": ["text"],
+      "priority": "P0",
+      "drama_relevance": "medium",
+      "description": "General conversational response generation with system, developer and user instructions."
+    },
+    {
+      "id": "text.reason",
+      "name": "复杂推理",
+      "domain": "reasoning",
+      "modalities": ["text"],
+      "priority": "P0",
+      "drama_relevance": "high",
+      "description": "Multi-step reasoning, planning, decomposition and self-checking. Reasoning state must be controlled separately from visible output."
+    },
+    {
+      "id": "context.long",
+      "name": "长上下文",
+      "domain": "context",
+      "modalities": ["text", "file"],
+      "priority": "P0",
+      "drama_relevance": "high",
+      "description": "Long document and project context handling with truncation, summarization and retrieval support."
+    },
+    {
+      "id": "vision.understand",
+      "name": "图片理解",
+      "domain": "multimodal",
+      "modalities": ["image", "text"],
+      "priority": "P1",
+      "drama_relevance": "high",
+      "description": "Image input understanding, OCR-like reading, visual QA and character/style inspection."
+    },
+    {
+      "id": "video.understand",
+      "name": "视频理解",
+      "domain": "multimodal",
+      "modalities": ["video", "audio", "text"],
+      "priority": "P1",
+      "drama_relevance": "high",
+      "description": "Video input understanding, scene segmentation, shot analysis, temporal reasoning and subtitle alignment."
+    },
+    {
+      "id": "image.generate",
+      "name": "图片生成",
+      "domain": "generation",
+      "modalities": ["text", "image"],
+      "priority": "P1",
+      "drama_relevance": "high",
+      "description": "Image generation or image editing through provider adapters."
+    },
+    {
+      "id": "video.generate",
+      "name": "视频生成",
+      "domain": "generation",
+      "modalities": ["text", "image", "video"],
+      "priority": "P1",
+      "drama_relevance": "high",
+      "description": "Text-to-video, image-to-video and video editing provider routing."
+    },
+    {
+      "id": "audio.asr",
+      "name": "语音识别",
+      "domain": "audio",
+      "modalities": ["audio", "text"],
+      "priority": "P1",
+      "drama_relevance": "medium",
+      "description": "Speech-to-text, subtitle generation and speaker-aware transcription."
+    },
+    {
+      "id": "audio.tts",
+      "name": "语音合成",
+      "domain": "audio",
+      "modalities": ["text", "audio"],
+      "priority": "P1",
+      "drama_relevance": "high",
+      "description": "Text-to-speech, role voice generation and dubbing provider routing."
+    },
+    {
+      "id": "tool.calling",
+      "name": "工具调用",
+      "domain": "tools",
+      "modalities": ["text", "tool"],
+      "priority": "P0",
+      "drama_relevance": "medium",
+      "description": "Structured tool/function calling with permission, schema and audit controls."
+    },
+    {
+      "id": "skills.runtime",
+      "name": "Skills 运行时",
+      "domain": "extension",
+      "modalities": ["text", "tool", "file"],
+      "priority": "P1",
+      "drama_relevance": "medium",
+      "description": "Skill registry, skill invocation and skill lifecycle integration."
+    },
+    {
+      "id": "mcp.runtime",
+      "name": "MCP 运行时",
+      "domain": "extension",
+      "modalities": ["tool", "resource", "prompt"],
+      "priority": "P1",
+      "drama_relevance": "medium",
+      "description": "MCP tool/resource/prompt mapping with credential isolation and approval rules."
+    },
+    {
+      "id": "memory.retrieve",
+      "name": "记忆检索",
+      "domain": "memory",
+      "modalities": ["text", "metadata"],
+      "priority": "P1",
+      "drama_relevance": "high",
+      "description": "Search session, user, project and task memory with permission and retention rules."
+    },
+    {
+      "id": "memory.write",
+      "name": "记忆写入",
+      "domain": "memory",
+      "modalities": ["text", "metadata"],
+      "priority": "P1",
+      "drama_relevance": "high",
+      "description": "Write structured memory items with scope, TTL, tags and sensitivity metadata."
+    },
+    {
+      "id": "rules.evaluate",
+      "name": "规则评估",
+      "domain": "policy",
+      "modalities": ["metadata"],
+      "priority": "P0",
+      "drama_relevance": "medium",
+      "description": "Evaluate routing, budget, region, provider, tool and approval rules."
+    },
+    {
+      "id": "agent.run",
+      "name": "Agent 编排",
+      "domain": "agent",
+      "modalities": ["text", "tool", "file", "metadata"],
+      "priority": "P1",
+      "drama_relevance": "medium",
+      "description": "Run multi-step agent workflows with state, tool calls, approvals and resume/cancel/retry."
+    },
+    {
+      "id": "embedding.text",
+      "name": "文本向量",
+      "domain": "retrieval",
+      "modalities": ["text", "embedding"],
+      "priority": "P1",
+      "drama_relevance": "medium",
+      "description": "Generate text embeddings for RAG, memory and semantic search."
+    },
+    {
+      "id": "drama.story_reasoning",
+      "name": "短剧/漫剧故事推理",
+      "domain": "drama_specialist",
+      "modalities": ["text", "metadata"],
+      "priority": "P1",
+      "drama_relevance": "critical",
+      "description": "Story structure, character motivation, conflict, reversal, episode hook and audience retention reasoning."
+    },
+    {
+      "id": "drama.visual_planning",
+      "name": "短剧/漫剧视觉规划",
+      "domain": "drama_specialist",
+      "modalities": ["text", "image", "video", "metadata"],
+      "priority": "P1",
+      "drama_relevance": "critical",
+      "description": "Character bible, scene bible, storyboard, shot plan and visual prompt planning for AI short drama/comic production."
+    }
+  ]
+}
