@@ -31,6 +31,7 @@ The foundation layer owns:
 - agent run contract
 - provider adapter contract
 - API key and workspace scope contract
+- auth audit and rate limit contract
 - response envelope and error code contract
 
 ## Unified content blocks
@@ -104,6 +105,27 @@ Public endpoints:
 - `/v1/health`
 - `/docs`
 - `/openapi.json`
+
+Auth audit events are written to:
+
+```text
+outputs/auth/auth_audit.jsonl
+```
+
+Rate limiting can be enabled with:
+
+```text
+FOUNDATION_RATE_LIMIT_ENABLED=true
+FOUNDATION_RATE_LIMITS=configs/auth/rate_limits.json
+FOUNDATION_RATE_LIMIT_STATE=outputs/auth/rate_limit_state.json
+```
+
+Rate-limited responses use HTTP `429` and return:
+
+- `Retry-After`
+- `X-RateLimit-Limit`
+- `X-RateLimit-Remaining`
+- `X-RateLimit-Reset`
 
 ## Model capabilities and instances
 
@@ -227,10 +249,10 @@ Applications can use these capabilities later through the same routing and API l
 
 ## Next implementation step
 
-After model-decided tool loop v1, continue with:
+After auth audit and rate limiting v1, continue with:
 
 1. local provider concurrency and cache controls
-2. OpenAPI lint/check tooling
-3. provider usage reconciliation
-4. auth audit log and rate limiting
-5. streaming run events
+2. provider usage reconciliation
+3. streaming run events
+4. workspace-level budget and quota checks
+5. distributed rate limiting backend
