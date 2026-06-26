@@ -20,12 +20,14 @@ It also checks that important OpenAPI sections and fields are present, including
 - `FoundationRequest`
 - `FoundationResponse`
 - `ProviderStreamEvent`
+- `ProviderToolCall`
 - `AgentRunRequest`
 - `AgentSkillCall`
 - `AgentEvent`
 - `AgentEventsResponse`
 - provider execution fields
-- provider streaming fields such as `stream`, `stream_chunk_chars` and provider stream events
+- provider streaming fields such as `stream`, `stream_include_usage`, `stream_options`, `stream_chunk_chars` and provider stream events
+- streamed tool-call reconstruction fields such as `provider_stream_tool_call_delta`, `tool_calls` and `arguments_json`
 - request-driven skill loop fields
 - model tool loop fields
 - Agent event stream fields such as `disable_events` and `text/event-stream`
@@ -54,7 +56,7 @@ openapi_contract_check=ok
 
 ## Purpose
 
-The foundation API now includes router, token/cost, memory, rules, skills, MCP, API key mode, provider execution, provider streaming, Agent tool loop controls and live Agent event reads.
+The foundation API now includes router, token/cost, memory, rules, skills, MCP, API key mode, provider execution, provider streaming, streamed tool-call reconstruction, Agent tool loop controls and live Agent event reads.
 
 This check helps keep runtime routes and the static OpenAPI file consistent as the API changes.
 
