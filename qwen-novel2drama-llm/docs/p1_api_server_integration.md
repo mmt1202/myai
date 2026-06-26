@@ -69,6 +69,45 @@ To call a provider adapter, pass:
 
 This keeps routing and cost preflight safe by default.
 
+## Agent provider execution
+
+`/v1/agent/run` now supports the same provider execution controls through `agent/runtime.py`.
+
+Provider preflight only:
+
+```json
+{
+  "task": "summarize this",
+  "route_mode": "smart",
+  "approval_policy": "never"
+}
+```
+
+Provider dry-run execution:
+
+```json
+{
+  "task": "summarize this",
+  "route_mode": "smart",
+  "approval_policy": "never",
+  "execute_provider": true,
+  "dry_run_provider": true,
+  "base_url": "http://localhost:8000/v1"
+}
+```
+
+The agent writes run artifacts under:
+
+```text
+outputs/agent_runtime/api/<request_id-or-latest>/
+```
+
+Artifacts can include:
+
+- `agent_run_report.json`
+- `provider_response.json`
+- `usage_ledger.jsonl`
+
 ## Memory
 
 The API uses:
@@ -92,16 +131,16 @@ for the default JSONL memory store.
 ## Current limitations
 
 - Static OpenAPI contract still needs to be synchronized with the new helper routes.
-- Provider execution is available in `/v1/chat`, but Agent runtime does not yet execute providers.
 - Agent skill loop is not implemented yet.
+- Local provider adapter is not implemented yet.
 - No streaming API yet.
 - No authentication layer yet.
 - No database-backed memory or run store yet.
 
 ## Next steps
 
-- Integrate provider factory into `agent/runtime.py`.
 - Add Agent skill loop.
+- Add local provider adapter for the existing local runtime.
 - Update static OpenAPI contract with all runtime helper routes.
 - Add authentication, workspace and API key scopes.
 - Add streaming events.
