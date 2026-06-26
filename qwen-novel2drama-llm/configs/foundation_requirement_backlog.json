@@ -1,7 +1,7 @@
 {
   "backlog_name": "foundation_requirement_backlog_v1",
-  "status": "P0_contracts_implemented_v1_pending_core_services",
-  "principle": "The deep research report is sufficient for architecture direction. P0 contracts now convert the first foundation requirements into machine-readable schemas, registries, OpenAPI and tests. Runtime services are still pending.",
+  "status": "P1_core_services_partially_implemented_v1",
+  "principle": "P0 contracts are implemented. P1 runtime services have started with model routing, token estimation, cost estimation and usage ledger. Memory, rules and general agent runtime remain pending.",
   "phases": [
     {
       "id": "P0_contracts",
@@ -9,116 +9,33 @@
       "priority": "P0",
       "status": "implemented_contract_v1",
       "items": [
-        {
-          "id": "content_block_schema",
-          "title": "统一 content block JSON Schema",
-          "deliverables": [
-            "configs/schemas/content_block_schema.json",
-            "tests/test_foundation_contracts.py"
-          ],
-          "acceptance": [
-            "supports text/image/video/audio/subtitle/metadata/file/url blocks",
-            "supports media segment metadata",
-            "supports provenance and content credential fields",
-            "contract validation tests cover core modalities"
-          ],
-          "status": "implemented_contract_v1"
-        },
-        {
-          "id": "error_code_schema",
-          "title": "统一错误码与响应 envelope schema",
-          "deliverables": [
-            "configs/schemas/error_code_schema.json",
-            "configs/schemas/response_envelope_schema.json",
-            "tests/test_foundation_contracts.py"
-          ],
-          "acceptance": [
-            "standard response envelope includes request_id/trace_id/status/model/usage/cost/output/warnings",
-            "standard error codes include auth/rate/model/budget/policy/provider errors",
-            "contract validation tests cover envelope fields"
-          ],
-          "status": "implemented_contract_v1"
-        },
-        {
-          "id": "foundation_openapi_spec",
-          "title": "Foundation API OpenAPI 规格",
-          "deliverables": [
-            "openapi/foundation_api.openapi.yaml",
-            "docs/foundation_api_contract.md",
-            "tests/test_foundation_contracts.py"
-          ],
-          "acceptance": [
-            "documents chat/reason/multimodal/token/cost/memory/rules/skills/mcp/agent endpoints",
-            "all endpoints use shared contract concepts",
-            "contract tests verify core endpoints are present"
-          ],
-          "status": "implemented_contract_v1"
-        },
-        {
-          "id": "model_capability_registry",
-          "title": "模型能力注册表",
-          "deliverables": [
-            "configs/model_capability_registry.json",
-            "scripts/inspect_model_capabilities.py",
-            "tests/test_foundation_contracts.py"
-          ],
-          "acceptance": [
-            "capability is separated from model instance",
-            "includes general, multimodal, token, memory, rules, skills, mcp, agent and drama-specialist capabilities",
-            "inspector can filter by domain, priority and drama relevance"
-          ],
-          "status": "implemented_contract_v1"
-        },
-        {
-          "id": "model_instance_registry",
-          "title": "模型实例注册表",
-          "deliverables": [
-            "configs/model_instance_registry.json",
-            "scripts/inspect_model_instances.py",
-            "tests/test_foundation_contracts.py"
-          ],
-          "acceptance": [
-            "records provider/runtime/model/snapshot/alias/context/cost/lifecycle/region/privacy metadata",
-            "links model instances to capabilities",
-            "supports deprecated and replacement metadata fields"
-          ],
-          "status": "implemented_contract_v1"
-        },
-        {
-          "id": "model_router_contract",
-          "title": "模型路由策略契约",
-          "deliverables": [
-            "configs/model_router.yaml",
-            "tests/test_foundation_contracts.py"
-          ],
-          "acceptance": [
-            "supports smart/cheap/balanced/local-first/cloud-first/drama-specialist/code-specialist/fallback modes",
-            "separates hard policy filters from soft scoring",
-            "defines route decision log fields"
-          ],
-          "status": "implemented_contract_v1"
-        }
+        {"id": "content_block_schema", "title": "统一 content block JSON Schema", "deliverables": ["configs/schemas/content_block_schema.json", "tests/test_foundation_contracts.py"], "status": "implemented_contract_v1"},
+        {"id": "error_code_schema", "title": "统一错误码与响应 envelope schema", "deliverables": ["configs/schemas/error_code_schema.json", "configs/schemas/response_envelope_schema.json", "tests/test_foundation_contracts.py"], "status": "implemented_contract_v1"},
+        {"id": "foundation_openapi_spec", "title": "Foundation API OpenAPI 规格", "deliverables": ["openapi/foundation_api.openapi.yaml", "docs/foundation_api_contract.md", "tests/test_foundation_contracts.py"], "status": "implemented_contract_v1"},
+        {"id": "model_capability_registry", "title": "模型能力注册表", "deliverables": ["configs/model_capability_registry.json", "scripts/inspect_model_capabilities.py", "tests/test_foundation_contracts.py"], "status": "implemented_contract_v1"},
+        {"id": "model_instance_registry", "title": "模型实例注册表", "deliverables": ["configs/model_instance_registry.json", "scripts/inspect_model_instances.py", "tests/test_foundation_contracts.py"], "status": "implemented_contract_v1"},
+        {"id": "model_router_contract", "title": "模型路由策略契约", "deliverables": ["configs/model_router.yaml", "tests/test_foundation_contracts.py"], "status": "implemented_contract_v1"}
       ]
     },
     {
       "id": "P1_core_services",
       "name": "底座核心服务",
       "priority": "P1",
-      "status": "pending",
+      "status": "partially_implemented_v1",
       "items": [
         {
           "id": "model_router_service",
           "title": "模型路由器实现",
-          "deliverables": ["inference/model_router.py", "tests/test_model_router.py"],
+          "deliverables": ["inference/model_router.py", "tests/test_foundation_core_services.py"],
           "acceptance": ["selects candidates by capabilities and constraints", "returns fallback chain", "records route decision metadata"],
-          "status": "pending"
+          "status": "implemented_v1"
         },
         {
           "id": "token_cost_usage_services",
           "title": "token、成本与 usage ledger 服务",
-          "deliverables": ["services/token_counter.py", "services/cost_estimator.py", "services/usage_ledger.py", "tests/test_usage_services.py"],
-          "acceptance": ["supports preflight estimates", "supports actual provider usage reconciliation", "supports cached input and multimodal billable units"],
-          "status": "pending"
+          "deliverables": ["services/token_counter.py", "services/cost_estimator.py", "services/usage_ledger.py", "tests/test_foundation_core_services.py"],
+          "acceptance": ["supports preflight estimates", "supports cost estimates from model instance pricing", "supports JSONL usage ledger and summary"],
+          "status": "implemented_v1"
         },
         {
           "id": "memory_service",
@@ -149,34 +66,10 @@
       "priority": "P2",
       "status": "pending",
       "items": [
-        {
-          "id": "provider_adapter_interface",
-          "title": "Provider adapter 接口",
-          "deliverables": ["providers/base.py", "providers/openai_compatible.py", "tests/test_provider_adapter_contract.py"],
-          "acceptance": ["normalizes provider request/response/usage/error fields", "supports text, multimodal, media generation and embeddings extension points", "supports provider health metadata"],
-          "status": "pending"
-        },
-        {
-          "id": "mcp_skill_runtime",
-          "title": "通用 Skills/MCP runtime",
-          "deliverables": ["skills/registry.py", "mcp/adapter.py", "tests/test_skill_mcp_runtime.py"],
-          "acceptance": ["supports internal skill registry", "supports MCP tool/resource/prompt mapping", "supports approval policy and credential isolation"],
-          "status": "pending"
-        },
-        {
-          "id": "observability_audit",
-          "title": "观测、审计与路由决策日志",
-          "deliverables": ["services/observability.py", "services/audit_log.py", "configs/schemas/trace_event_schema.json", "tests/test_observability_audit.py"],
-          "acceptance": ["records trace_id/request_id/provider_request_id", "records route decisions, usage, cost and policy hits", "redacts sensitive fields"],
-          "status": "pending"
-        },
-        {
-          "id": "evaluation_suite",
-          "title": "底座评测体系",
-          "deliverables": ["eval/foundation_eval_manifest.json", "eval/run_foundation_eval.py", "tests/test_foundation_eval_manifest.py"],
-          "acceptance": ["covers reasoning, tool calling, multimodal, routing, memory, cost and drama-specialist metrics", "supports regression gate", "outputs machine-readable eval report"],
-          "status": "pending"
-        }
+        {"id": "provider_adapter_interface", "title": "Provider adapter 接口", "deliverables": ["providers/base.py", "providers/openai_compatible.py", "tests/test_provider_adapter_contract.py"], "status": "pending"},
+        {"id": "mcp_skill_runtime", "title": "通用 Skills/MCP runtime", "deliverables": ["skills/registry.py", "mcp/adapter.py", "tests/test_skill_mcp_runtime.py"], "status": "pending"},
+        {"id": "observability_audit", "title": "观测、审计与路由决策日志", "deliverables": ["services/observability.py", "services/audit_log.py", "configs/schemas/trace_event_schema.json", "tests/test_observability_audit.py"], "status": "pending"},
+        {"id": "evaluation_suite", "title": "底座评测体系", "deliverables": ["eval/foundation_eval_manifest.json", "eval/run_foundation_eval.py", "tests/test_foundation_eval_manifest.py"], "status": "pending"}
       ]
     }
   ]
