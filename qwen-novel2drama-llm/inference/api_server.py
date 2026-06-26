@@ -13,7 +13,8 @@ for path in [PROJECT_ROOT, INFERENCE_DIR]:
         sys.path.insert(0, str(path))
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from model_utils import generate_text, load_model, load_system_prompt
 from model_version_registry import resolve_model_paths
 from pydantic import BaseModel, Field
@@ -23,6 +24,7 @@ from inference.model_router import route_model
 from mcp.adapter import FoundationMCPAdapter
 from providers.base import ProviderError, response_envelope
 from providers.factory import generate_with_registry
+from services.auth import AuthError, auth_required_from_env, build_auth_context, key_store_path_from_env, load_key_store
 from services.cost_estimator import estimate_request_cost, instance_by_id
 from services.memory_store import search_memory, write_memory
 from services.rule_engine import evaluate_rules, load_rules
@@ -87,6 +89,36 @@ def failed(body: dict[str, Any], code: str, message: str, **kwargs: Any) -> dict
     )
 
 
+@app.middleware("http")
+async def foundation_auth_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+    path = request.url.path
+    if not path.startswith("/v1/") and path != "/health":
+        return await call_next(request)
+    try:
+        store = load_key_store(key_store_path_from_env(PROJECT_ROOT))
+        auth_context = build_auth_context(
+            method=request.method,
+            path=path,
+            api_key=request.headers.get("X-API-Key"),
+            workspace_id=request.headers.get("X-Workspace-Id"),
+            store=store,
+            auth_required=auth_required_from_env(),
+        )
+        request.state.auth_context = auth_context
+    except AuthError as exc:
+        content = response_envelope(
+            status="failed",
+            output=None,
+            error={"code": exc.code, "message": exc.message, "retryable": False, "details": exc.to_dict()},
+        )
+        return JSONResponse(status_code=exc.status_code, content=content)
+    response = await call_next(request)
+    key_id = str(getattr(request.state, "auth_context", {}).get("key_id") or "")
+    if key_id:
+        response.headers["X-Foundation-Auth-Key-Id"] = key_id
+    return response
+
+
 @app.get("/health")
 def health() -> dict[str, str | None]:
     return {"status": "ok", "model_version": ACTIVE_MODEL_VERSION, "model_path": ACTIVE_MODEL_PATH}
@@ -99,7 +131,7 @@ def foundation_health() -> dict[str, Any]:
         "service": "myai-foundation",
         "model_version": ACTIVE_MODEL_VERSION,
         "model_path": ACTIVE_MODEL_PATH,
-        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "provider"],
+        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "provider", "auth"],
     }
 
 
