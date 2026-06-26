@@ -7,7 +7,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from providers.factory import build_provider, find_model_instance, generate_with_registry
+from providers.factory import build_provider, find_model_instance, generate_with_registry, stream_generate_with_registry
 from providers.local_text import LocalTextProvider
 from providers.openai_compatible import OpenAICompatibleProvider
 
@@ -38,6 +38,14 @@ class ProviderFactoryTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["output"]["dry_run"])
         self.assertEqual(result["model"]["provider"], "local")
+
+    def test_stream_generate_with_local_provider_dry_run(self) -> None:
+        registry = {"instances": [{"id": "local1", "aliases": ["local"], "provider": "local", "runtime": "transformers", "model_name": "demo"}]}
+        chunks = list(stream_generate_with_registry({"model_id": "local1", "dry_run": True, "input": [{"type": "text", "text": "hello"}], "model_path": "/tmp/demo-model", "stream_chunk_chars": 2}, registry))
+        self.assertEqual(chunks[0]["event_type"], "provider_stream_started")
+        self.assertTrue(any(chunk["event_type"] == "provider_stream_delta" for chunk in chunks))
+        self.assertEqual(chunks[-1]["event_type"], "provider_stream_completed")
+        self.assertTrue(chunks[-1]["done"])
 
 
 if __name__ == "__main__":
