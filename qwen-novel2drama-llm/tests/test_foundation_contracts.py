@@ -83,6 +83,12 @@ class FoundationContractsTests(unittest.TestCase):
         ]:
             self.assertIn(field, text)
 
+    def test_openapi_contains_api_key_security_scheme(self) -> None:
+        text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
+        self.assertIn("ApiKeyAuth:", text)
+        self.assertIn("X-API-Key", text)
+        self.assertIn("X-Workspace-Id", text)
+
     def test_openapi_no_longer_claims_unimplemented_jobs_endpoint(self) -> None:
         text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
         self.assertNotIn("/v1/jobs/{job_id}", text)
