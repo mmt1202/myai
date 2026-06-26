@@ -54,6 +54,7 @@ class AgentRuntimeTests(unittest.TestCase):
             )
             self.assertEqual(run["status"], "completed")
             self.assertEqual(run["route_decision"]["selected_model_id"], "local.qwen2_5_1_5b_instruct")
+            self.assertTrue((Path(tmpdir) / "usage_ledger.jsonl").exists())
 
     def test_run_agent_once_waits_for_review(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
@@ -71,6 +72,44 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertIn(run["status"], {"waiting_approval", "completed"})
             self.assertIn("route_decision", run)
             self.assertIn("rule_decision", run)
+
+    def test_run_agent_once_executes_provider_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+            run = run_agent_once(
+                project_root=PROJECT_ROOT,
+                request={
+                    "task": "hello provider",
+                    "route_mode": "smart",
+                    "input": [{"type": "text", "text": "world"}],
+                    "approval_policy": "never",
+                    "execute_provider": True,
+                    "dry_run_provider": True,
+                    "base_url": "http://example.test/v1",
+                },
+                output_dir=Path(tmpdir),
+            )
+            self.assertEqual(run["status"], "completed")
+            self.assertIsNotNone(run["provider_response"])
+            self.assertTrue(run["provider_response"]["output"]["dry_run"])
+            self.assertTrue((Path(tmpdir) / "provider_response.json").exists())
+            self.assertTrue((Path(tmpdir) / "usage_ledger.jsonl").exists())
+
+    def test_run_agent_provider_failure_is_failed_status(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+            run = run_agent_once(
+                project_root=PROJECT_ROOT,
+                request={
+                    "task": "local provider unsupported",
+                    "route_mode": "balanced",
+                    "privacy": {"local_only": True},
+                    "approval_policy": "never",
+                    "execute_provider": True,
+                    "dry_run_provider": True,
+                },
+                output_dir=Path(tmpdir),
+            )
+            self.assertEqual(run["status"], "failed")
+            self.assertEqual(run["error"], "provider_not_supported")
 
 
 if __name__ == "__main__":
