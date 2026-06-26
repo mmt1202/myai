@@ -83,6 +83,18 @@ class FoundationContractsTests(unittest.TestCase):
         ]:
             self.assertIn(field, text)
 
+    def test_openapi_agent_schema_contains_model_tool_loop_fields(self) -> None:
+        text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
+        for field in [
+            "enable_model_tool_loop:",
+            "max_tool_rounds:",
+            "allow_model_tool_provider:",
+            "allow_model_tool_write:",
+            "approve_model_tools:",
+            "fail_on_model_tool_error:",
+        ]:
+            self.assertIn(field, text)
+
     def test_openapi_contains_api_key_security_scheme(self) -> None:
         text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
         self.assertIn("ApiKeyAuth:", text)
