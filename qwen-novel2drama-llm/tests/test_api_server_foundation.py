@@ -10,6 +10,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "inference"))
 
 import inference.api_server as api_server
+from agent.events import write_agent_event
 
 
 class FoundationApiServerTests(unittest.TestCase):
@@ -17,6 +18,7 @@ class FoundationApiServerTests(unittest.TestCase):
         result = api_server.foundation_health()
         self.assertEqual(result["status"], "ok")
         self.assertIn("router", result["capabilities"])
+        self.assertIn("agent_events", result["capabilities"])
 
     def test_token_count_api(self) -> None:
         result = api_server.token_count_api({"request_id": "r1", "input": [{"type": "text", "text": "hello"}], "expected_output_tokens": 10})
@@ -35,7 +37,7 @@ class FoundationApiServerTests(unittest.TestCase):
         self.assertEqual(result["output"]["decision"]["decision"], "deny")
 
     def test_memory_write_and_search_api(self) -> None:
-        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+        with tempfile.TemporaryDirectory() as tmpdir:
             original = api_server.MEMORY_STORE_PATH
             api_server.MEMORY_STORE_PATH = Path(tmpdir) / "memory.jsonl"
             try:
@@ -59,6 +61,33 @@ class FoundationApiServerTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["output"]["provider_execution"], "skipped")
         self.assertIn("provider_execution_skipped", result["warnings"])
+
+    def test_agent_output_dir_uses_request_or_run_id(self) -> None:
+        self.assertEqual(api_server.agent_output_dir_for({"request_id": "r1"}).name, "r1")
+        self.assertEqual(api_server.agent_output_dir_for({"run_id": "run1"}).name, "run1")
+        self.assertEqual(api_server.agent_output_dir_for({}).name, "latest")
+
+    def test_agent_events_api_reads_json_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original = api_server.AGENT_OUTPUT_DIR
+            api_server.AGENT_OUTPUT_DIR = Path(tmpdir)
+            try:
+                events_path = api_server.agent_events_path("run1")
+                write_agent_event(events_path, {"run_id": "run1", "event_type": "run_started", "status": "running"})
+                write_agent_event(events_path, {"run_id": "run1", "event_type": "run_completed", "status": "completed"})
+                result = api_server.agent_events_api(run_id="run1")
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(result["output"]["run_id"], "run1")
+                self.assertEqual(len(result["output"]["events"]), 2)
+                self.assertEqual(result["output"]["summary"]["terminal_event"]["event_type"], "run_completed")
+            finally:
+                api_server.AGENT_OUTPUT_DIR = original
+
+    def test_sse_event_format(self) -> None:
+        payload = api_server.sse_event({"event_id": "e1", "event_type": "run_started", "status": "running"})
+        self.assertIn("id: e1", payload)
+        self.assertIn("event: run_started", payload)
+        self.assertIn("data:", payload)
 
 
 if __name__ == "__main__":
