@@ -11,9 +11,11 @@ Implemented files:
 - `agent/runtime.py`
 - `agent/events.py`
 - `agent/tool_loop.py`
+- `agent/lifecycle.py`
 - `tests/test_agent_runtime.py`
 - `tests/test_agent_events.py`
 - `tests/test_agent_tool_loop.py`
+- `tests/test_agent_lifecycle.py`
 
 ## Run states
 
@@ -44,28 +46,31 @@ Current runtime supports approval gates from rule decisions and cost thresholds.
 
 `run_agent_once` currently performs:
 
-1. create run
-2. write `run_created` event
-3. transition to running
-4. build foundation request
-5. route model
-6. estimate usage and cost through router output
-7. evaluate rules
-8. apply approval gate when needed
-9. optionally execute request-defined skills
-10. optionally execute provider through provider factory
-11. optionally execute model-decided tool calls returned by the provider
-12. optionally collect provider stream chunks and bridge reconstructed tool calls into the model tool loop
-13. optionally execute complete streamed tool calls as soon as their name and JSON arguments are available
-14. record estimated or actual usage in a run-local usage ledger
-15. write `events.jsonl`
-16. write `agent_run_report.json`
+1. persist the original request to `agent_request.json`
+2. create run
+3. write `run_created` event
+4. transition to running
+5. check cancellation at key checkpoints
+6. build foundation request
+7. route model
+8. estimate usage and cost through router output
+9. evaluate rules
+10. apply approval gate when needed
+11. optionally execute request-defined skills
+12. optionally execute provider through provider factory
+13. optionally execute model-decided tool calls returned by the provider
+14. optionally collect provider stream chunks and bridge reconstructed tool calls into the model tool loop
+15. optionally execute complete streamed tool calls as soon as their name and JSON arguments are available
+16. record estimated or actual usage in a run-local usage ledger
+17. write `events.jsonl`
+18. write `agent_run_report.json`
 
 Possible final states:
 
 - `completed`
 - `waiting_approval`
 - `failed`
+- `cancelled`
 
 ## Agent event stream
 
@@ -83,6 +88,7 @@ outputs/agent_runtime/api/<request_id-or-run_id-or-latest>/
 
 The final run report includes:
 
+- `artifacts.request`
 - `artifacts.events`
 - `event_summary`
 
@@ -111,6 +117,7 @@ Common event types:
 - `model_tool_loop_failed`
 - `run_completed`
 - `run_failed`
+- `run_cancelled`
 
 Read events from CLI:
 
@@ -172,6 +179,67 @@ data: <full event JSON>
 ```
 
 The stream stops when it emits a terminal event or reaches `max_seconds`.
+
+## Agent lifecycle controls
+
+`agent/lifecycle.py` provides file-backed lifecycle operations:
+
+- `status`
+- `cancel`
+- `retry`
+- `resume`
+
+Status:
+
+```bash
+python agent/lifecycle.py \
+  --output-root outputs/agent_runtime/api \
+  status \
+  --run-id demo
+```
+
+Cancel:
+
+```bash
+python agent/lifecycle.py \
+  --output-root outputs/agent_runtime/api \
+  cancel \
+  --run-id demo \
+  --reason user_requested
+```
+
+Cancel writes:
+
+```text
+cancel_requested.json
+```
+
+The runtime checks this file at key checkpoints and transitions to `cancelled` with a `run_cancelled` event when it sees the marker. This is cooperative cancellation, not hard provider process interruption.
+
+Retry:
+
+```bash
+python agent/lifecycle.py \
+  --project-root . \
+  --output-root outputs/agent_runtime/api \
+  retry \
+  --run-id demo \
+  --new-run-id demo_retry
+```
+
+Resume:
+
+```bash
+python agent/lifecycle.py \
+  --project-root . \
+  --output-root outputs/agent_runtime/api \
+  resume \
+  --run-id demo \
+  --new-run-id demo_resume \
+  --overrides '{"skill_calls": []}'
+```
+
+Retry/resume load `agent_request.json`, merge optional overrides, assign a new run id and call the normal runtime again. The child run records `retry_of` or `resume_of` and `parent_run_id`.
 
 ## Request-driven skill loop
 
@@ -326,6 +394,7 @@ Local provider execution is supported through `providers/local_text.py`. Real lo
 
 When provider execution runs, the runtime writes:
 
+- `agent_request.json`
 - `provider_response.json`
 - `usage_ledger.jsonl`
 - `events.jsonl`
@@ -428,9 +497,12 @@ python agent/runtime.py \
 
 ## Current limitations
 
+- Cancel is cooperative and checkpoint-based; it does not forcibly terminate an in-flight provider call.
+- Retry/resume are replay-based and create a child run; they do not continue from an arbitrary internal Python stack frame.
+- Resume from completed runs is blocked by default unless explicitly allowed.
 - Incremental execution requires complete JSON arguments; partial or malformed arguments are ignored until they become complete.
 - Incremental execution does not inject tool results back into the same open provider stream.
 - Tool execution is still synchronous.
 - Stream chunks are stored as JSONL files, not a distributed event log.
-- Resume/cancel/retry is not implemented yet.
+- Lifecycle state is file-backed, not a distributed run database.
 - Approval is coarse-grained and not yet a full human-in-the-loop workflow.
