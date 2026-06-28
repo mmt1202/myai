@@ -5,8 +5,11 @@ This layer introduces a replaceable run store contract for Agent run state.
 Implemented files:
 
 - `agent/run_store.py`
+- `agent/sqlite_run_store.py`
 - `agent/lifecycle.py`
+- `inference/api_server.py`
 - `tests/test_run_store.py`
+- `tests/test_sqlite_run_store.py`
 - `tests/test_agent_lifecycle.py`
 - `tests/test_api_server_foundation.py`
 
@@ -19,7 +22,7 @@ Before this layer, Agent lifecycle code read and wrote these files directly:
 - `events.jsonl`
 - `cancel_requested.json`
 
-The new run store abstraction makes those operations explicit so a future database-backed store can replace the file-backed implementation without rewriting lifecycle APIs.
+The run store abstraction makes those operations explicit so a future database-backed store can replace the file-backed implementation without rewriting lifecycle APIs.
 
 ## Contract
 
@@ -29,16 +32,33 @@ Base interface:
 RunStore
 ```
 
-Current implementation:
+Implemented stores:
 
 ```text
 FileRunStore
+SQLiteRunStore
 ```
 
-Factory:
+Factories:
 
 ```python
 file_run_store(output_root)
+sqlite_run_store(db_path)
+build_run_store(kind, output_root, sqlite_path=None)
+```
+
+Supported run store kinds:
+
+```text
+file
+sqlite
+sqlite3
+```
+
+`build_run_store()` defaults to file-backed storage. For SQLite, the default database path is:
+
+```text
+<output_root>/runs.sqlite
 ```
 
 Core operations:
@@ -56,6 +76,7 @@ Core operations:
 - `save_cancel_request(run_id, marker)`
 - `cancel_requested(run_id)`
 - `status(run_id)`
+- `metadata()`
 
 ## File-backed implementation
 
@@ -95,48 +116,9 @@ agent_run_created.json   -> initial created run snapshot
 }
 ```
 
-## Lifecycle integration
-
-`agent/lifecycle.py` now routes through `FileRunStore` while preserving its existing public function signatures:
-
-- `status_run(output_root, run_id, store=None)`
-- `cancel_run(output_root, run_id, ..., store=None)`
-- `retry_run(project_root=..., output_root=..., run_id=..., ..., store=None)`
-- `resume_run(project_root=..., output_root=..., run_id=..., ..., store=None)`
-
-The optional `store` parameter is the compatibility seam for future database-backed implementations.
-
-## API integration
-
-The API endpoints continue to call lifecycle functions:
-
-- `GET /v1/agent/status`
-- `POST /v1/agent/cancel`
-- `POST /v1/agent/retry`
-- `POST /v1/agent/resume`
-
-Because lifecycle functions now use the run store abstraction, those APIs are already aligned with the store boundary.
-
-## Safety
-
-`safe_run_id()` rejects:
-
-- empty ids
-- `/`
-- `\`
-- `..`
-
-This keeps the file-backed store from path traversal.
-
-
 ## SQLite-backed implementation
 
 `SQLiteRunStore` is a local database-backed implementation that uses Python standard-library `sqlite3` only. It is intended for single-node/local persistence and testable lifecycle state, not for distributed leases or Postgres-scale coordination.
-
-Implemented files:
-
-- `agent/sqlite_run_store.py`
-- `tests/test_sqlite_run_store.py`
 
 Factory:
 
@@ -177,25 +159,68 @@ Core operations supported in v1:
 
 Missing runs or missing request/report records raise `RunNotFoundError` so callers can treat SQLite and file-backed stores consistently.
 
-Current SQLite limitations:
+## Lifecycle integration
 
-- `SQLiteRunStore` is implemented but not yet wired into CLI/API run-store selection; that is a later task.
-- Runtime artifact writes still primarily use file paths directly.
-- This is not a distributed run store and does not provide cross-process leases, worker ownership, queueing, or Postgres compatibility.
+`agent/lifecycle.py` routes through a selected run store while preserving its public function signatures:
+
+- `status_run(output_root, run_id, store=None)`
+- `cancel_run(output_root, run_id, ..., store=None)`
+- `retry_run(project_root=..., output_root=..., run_id=..., ..., store=None)`
+- `resume_run(project_root=..., output_root=..., run_id=..., ..., store=None)`
+
+The optional `store` parameter is the compatibility seam for future database-backed implementations.
+
+CLI selection:
+
+```bash
+python agent/lifecycle.py --run-store file --output-root outputs/agent_runtime/api status --run-id demo
+python agent/lifecycle.py --run-store sqlite --sqlite-path outputs/agent_runtime/runs.sqlite status --run-id demo
+```
+
+## API integration
+
+The API endpoints continue to call lifecycle functions:
+
+- `GET /v1/agent/status`
+- `POST /v1/agent/cancel`
+- `POST /v1/agent/retry`
+- `POST /v1/agent/resume`
+
+The API server selects the store through environment variables:
+
+```text
+FOUNDATION_AGENT_RUN_STORE=file|sqlite
+FOUNDATION_AGENT_RUN_DB=outputs/agent_runtime/runs.sqlite
+```
+
+Default behavior remains file-backed.
+
+When `/v1/agent/run` completes, the API server indexes the request/report into the selected run store with `index_run_in_store()`. This makes `GET /v1/agent/status` work for SQLite-backed runs before the full runtime artifact migration is implemented.
+
+## Safety
+
+`safe_run_id()` rejects:
+
+- empty ids
+- `/`
+- `\`
+- `..`
+
+This keeps file paths and store keys from path traversal.
 
 ## Current limitations
 
 - Implemented stores are `FileRunStore` and local `SQLiteRunStore`.
-- Runtime writes still use file paths directly; lifecycle reads/writes now go through the store abstraction.
+- API/lifecycle can select SQLite, but runtime artifact writes still primarily use file paths directly.
+- API Agent events still read JSONL files; full DB-backed event streaming is a later task.
 - No Postgres implementation yet; SQLite is local-only and not distributed.
 - No transaction, lock, lease or distributed concurrency control yet.
 - No run listing/query index yet.
-- Event streaming still reads JSONL files.
 
 ## Next steps
 
-- Wire `SQLiteRunStore` into CLI/API run-store selection.
-- Add run listing and query filters.
 - Migrate runtime artifact writes to the store interface.
+- Add run listing and query filters.
 - Add DB-backed Agent events and lifecycle status reads.
 - Add locking/lease semantics for distributed workers.
+- Add Postgres run store implementation.
