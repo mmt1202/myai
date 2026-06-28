@@ -106,6 +106,15 @@ class FoundationContractsTests(unittest.TestCase):
         ]:
             self.assertIn(field, text)
 
+    def test_openapi_agent_schema_contains_workspace_quota_fields(self) -> None:
+        text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
+        for field in [
+            "workspace_quota_enabled:",
+            "workspace_quota_config_path:",
+            "workspace_quota_state_path:",
+        ]:
+            self.assertIn(field, text)
+
     def test_openapi_agent_schema_contains_model_tool_loop_fields(self) -> None:
         text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
         for field in [
