@@ -1,0 +1,3 @@
+# Provider adapter profile.
+# Current OpenAI-compatible provider tests use urllib and mocks only.
+# Add provider SDKs here only when a provider adapter truly imports them at runtime.
