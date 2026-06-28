@@ -55,9 +55,10 @@ Current runtime supports approval gates from rule decisions and cost thresholds.
 9. optionally execute request-defined skills
 10. optionally execute provider through provider factory
 11. optionally execute model-decided tool calls returned by the provider
-12. record estimated or actual usage in a run-local usage ledger
-13. write `events.jsonl`
-14. write `agent_run_report.json`
+12. optionally collect provider stream chunks and bridge reconstructed tool calls into the model tool loop
+13. record estimated or actual usage in a run-local usage ledger
+14. write `events.jsonl`
+15. write `agent_run_report.json`
 
 Possible final states:
 
@@ -249,6 +250,30 @@ The runtime writes:
 - `events.jsonl`
 - `agent_run_report.json`
 
+## Provider stream tool-call bridge
+
+`stream_provider_tool_calls` makes the provider step use provider streaming when the model tool loop is enabled.
+
+```json
+{
+  "execute_provider": true,
+  "enable_model_tool_loop": true,
+  "stream_provider_tool_calls": true,
+  "stream_include_usage": true
+}
+```
+
+With this enabled, the runtime:
+
+1. calls the selected provider through `stream_generate_with_registry`
+2. writes raw provider stream chunks to `provider_stream_chunks.jsonl`
+3. converts the final `provider_stream_completed` chunk into a standard provider response
+4. reads `output.tool_calls` from that response
+5. executes matching foundation skills through the existing model tool loop
+6. optionally streams follow-up provider rounds and writes `model_tool_loop_stream_round_<n>.jsonl`
+
+The stream bridge is synchronous: it waits for the provider stream to complete before executing tools. It does not yet execute tools while tokens are still arriving.
+
 ## Provider execution
 
 Provider execution is disabled by default.
@@ -276,6 +301,11 @@ When provider execution runs, the runtime writes:
 - `usage_ledger.jsonl`
 - `events.jsonl`
 - `agent_run_report.json`
+
+When `stream_provider_tool_calls` is enabled, it also writes:
+
+- `provider_stream_chunks.jsonl`
+- `model_tool_loop_stream_round_<n>.jsonl` for streamed follow-up rounds
 
 ## CLI
 
@@ -309,6 +339,18 @@ python agent/runtime.py \
   --max-tool-rounds 3
 ```
 
+Streamed provider tool-call bridge:
+
+```bash
+python agent/runtime.py \
+  --request examples/agent_request.json \
+  --output-dir outputs/agent_runtime/demo \
+  --execute-provider \
+  --enable-model-tool-loop \
+  --stream-provider-tool-calls \
+  --stream-include-usage
+```
+
 Local provider real execution:
 
 ```bash
@@ -340,17 +382,8 @@ python agent/runtime.py \
 
 ## Current limitations
 
-- SSE is implemented by polling the run-local JSONL event file.
-- Model-decided tool loop is synchronous.
-- Tool names must map to registered foundation skill ids.
-- Resume from existing run files is not implemented yet.
-- Database persistence is not implemented yet.
-- Approval resolution is not implemented yet.
-- WebSocket push is not implemented yet.
-
-## Next steps
-
-- Add resume/cancel/retry CLI commands.
-- Add provider usage reconciliation into the global usage ledger.
-- Add workspace-level budget and quota checks.
-- Add database-backed event store later.
+- The stream bridge waits for provider completion before executing tools.
+- Tool execution is still synchronous.
+- Stream chunks are stored as JSONL files, not a distributed event log.
+- Resume/cancel/retry is not implemented yet.
+- Approval is coarse-grained and not yet a full human-in-the-loop workflow.
