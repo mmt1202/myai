@@ -243,7 +243,7 @@ components:
         created_at: {type: string}
         request_id: {type: [string, 'null']}
         trace_id: {type: [string, 'null']}
-        event_type: {type: string, enum: [provider_stream_started, provider_stream_delta, provider_stream_tool_call_delta, provider_stream_completed, provider_stream_failed]}
+        event_type: {type: string, enum: [provider_stream_started, provider_stream_delta, provider_stream_tool_call_delta, provider_stream_tool_result, provider_stream_continuation_unsupported, provider_stream_continuation_failed, provider_stream_completed, provider_stream_failed]}
         index: {type: [integer, 'null']}
         model: {type: object, additionalProperties: true}
         delta: {type: [string, 'null']}
@@ -333,6 +333,7 @@ components:
         enable_model_tool_loop: {type: boolean, default: false}
         stream_provider_tool_calls: {type: boolean, default: false}
         incremental_stream_tool_execution: {type: boolean, default: false}
+        same_stream_tool_result_injection: {type: boolean, default: false}
         workspace_quota_enabled: {type: boolean, default: false}
         workspace_quota_config_path: {type: string}
         workspace_quota_state_path: {type: string}
