@@ -70,6 +70,7 @@ jobs:
             tests.test_auth_audit_rate_limit \
             tests.test_usage_reconciliation \
             tests.test_model_tool_loop_usage \
+            tests.test_provider_continuation \
             tests.test_workspace_quota \
             tests.test_skill_registry \
             tests.test_mcp_adapter
