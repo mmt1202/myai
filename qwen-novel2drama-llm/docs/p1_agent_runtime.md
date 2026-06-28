@@ -56,9 +56,10 @@ Current runtime supports approval gates from rule decisions and cost thresholds.
 10. optionally execute provider through provider factory
 11. optionally execute model-decided tool calls returned by the provider
 12. optionally collect provider stream chunks and bridge reconstructed tool calls into the model tool loop
-13. record estimated or actual usage in a run-local usage ledger
-14. write `events.jsonl`
-15. write `agent_run_report.json`
+13. optionally execute complete streamed tool calls as soon as their name and JSON arguments are available
+14. record estimated or actual usage in a run-local usage ledger
+15. write `events.jsonl`
+16. write `agent_run_report.json`
 
 Possible final states:
 
@@ -272,7 +273,35 @@ With this enabled, the runtime:
 5. executes matching foundation skills through the existing model tool loop
 6. optionally streams follow-up provider rounds and writes `model_tool_loop_stream_round_<n>.jsonl`
 
-The stream bridge is synchronous: it waits for the provider stream to complete before executing tools. It does not yet execute tools while tokens are still arriving.
+## Incremental stream tool execution
+
+`incremental_stream_tool_execution` can execute a streamed tool call before the provider stream has completed, once the partial tool call has both a tool name and JSON-decodable arguments.
+
+```json
+{
+  "execute_provider": true,
+  "enable_model_tool_loop": true,
+  "stream_provider_tool_calls": true,
+  "incremental_stream_tool_execution": true
+}
+```
+
+With this enabled, the runtime:
+
+1. listens for `provider_stream_tool_call_delta` chunks
+2. reads `metadata.tool_call_partial`
+3. waits until `function.name` and complete JSON `function.arguments` are available
+4. executes the matching foundation skill immediately
+5. records the result in `incremental_tool_results.json`
+6. reuses the pre-executed result in the final model tool loop to avoid duplicate tool calls
+
+For streamed follow-up rounds, it writes:
+
+```text
+model_tool_loop_incremental_round_<n>.json
+```
+
+This is not yet same-stream tool-result injection. The provider stream is still read to completion before the next provider request is made.
 
 ## Provider execution
 
@@ -306,6 +335,11 @@ When `stream_provider_tool_calls` is enabled, it also writes:
 
 - `provider_stream_chunks.jsonl`
 - `model_tool_loop_stream_round_<n>.jsonl` for streamed follow-up rounds
+
+When `incremental_stream_tool_execution` is enabled, it also writes:
+
+- `incremental_tool_results.json`
+- `model_tool_loop_incremental_round_<n>.json` for streamed follow-up rounds
 
 ## CLI
 
@@ -351,6 +385,18 @@ python agent/runtime.py \
   --stream-include-usage
 ```
 
+Incremental stream tool execution:
+
+```bash
+python agent/runtime.py \
+  --request examples/agent_request.json \
+  --output-dir outputs/agent_runtime/demo \
+  --execute-provider \
+  --enable-model-tool-loop \
+  --stream-provider-tool-calls \
+  --incremental-stream-tool-execution
+```
+
 Local provider real execution:
 
 ```bash
@@ -382,7 +428,8 @@ python agent/runtime.py \
 
 ## Current limitations
 
-- The stream bridge waits for provider completion before executing tools.
+- Incremental execution requires complete JSON arguments; partial or malformed arguments are ignored until they become complete.
+- Incremental execution does not inject tool results back into the same open provider stream.
 - Tool execution is still synchronous.
 - Stream chunks are stored as JSONL files, not a distributed event log.
 - Resume/cancel/retry is not implemented yet.
