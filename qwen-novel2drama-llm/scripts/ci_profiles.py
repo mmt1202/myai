@@ -38,6 +38,7 @@ PROFILES: dict[str, CIProfile] = {
             "tests.test_usage_reconciliation",
             "tests.test_model_tool_loop_usage",
             "tests.test_provider_continuation",
+            "tests.test_run_store",
             "tests.test_workspace_quota",
             "tests.test_skill_registry",
             "tests.test_mcp_adapter",
