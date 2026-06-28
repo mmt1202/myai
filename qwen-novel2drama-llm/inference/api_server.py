@@ -23,6 +23,7 @@ from model_version_registry import resolve_model_paths
 from pydantic import BaseModel, Field
 
 from agent.events import read_agent_events, summarize_agent_events
+from agent.lifecycle import cancel_run, resume_run, retry_run, status_run
 from agent.runtime import run_agent_once
 from inference.model_router import route_model
 from mcp.adapter import FoundationMCPAdapter
@@ -283,7 +284,7 @@ def foundation_health() -> dict[str, Any]:
         "service": "myai-foundation",
         "model_version": ACTIVE_MODEL_VERSION,
         "model_path": ACTIVE_MODEL_PATH,
-        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "provider", "provider_stream", "auth", "rate_limit", "audit"],
+        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "provider", "provider_stream", "auth", "rate_limit", "audit"],
     }
 
 
@@ -408,6 +409,76 @@ def agent_events_api(run_id: str = "latest", stream: bool = False, since_event_i
         {"request_id": safe_id},
         {"run_id": safe_id, "events": events, "summary": summarize_agent_events(events), "events_path": str(events_path)},
     )
+
+
+@app.get("/v1/agent/status")
+def agent_status_api(run_id: str = "latest") -> dict[str, Any]:
+    safe_id = safe_run_id(run_id)
+    body = {"request_id": safe_id, "run_id": safe_id}
+    try:
+        result = status_run(AGENT_OUTPUT_DIR, safe_id)
+        return ok(body, result)
+    except FileNotFoundError as exc:
+        return failed(body, "agent_run_not_found", str(exc))
+    except ValueError as exc:
+        return failed(body, "invalid_agent_run", str(exc))
+
+
+@app.post("/v1/agent/cancel")
+def agent_cancel_api(body: dict[str, Any]) -> dict[str, Any]:
+    run_id_value = safe_run_id(body.get("run_id") or request_id(body) or "latest")
+    request_body = {**body, "request_id": request_id(body) or run_id_value, "run_id": run_id_value}
+    try:
+        result = cancel_run(
+            AGENT_OUTPUT_DIR,
+            run_id_value,
+            reason=body.get("reason"),
+            requested_by=body.get("requested_by") or body.get("owner_id"),
+        )
+        return ok(request_body, result)
+    except ValueError as exc:
+        return failed(request_body, "invalid_agent_run", str(exc))
+
+
+@app.post("/v1/agent/retry")
+def agent_retry_api(body: dict[str, Any]) -> dict[str, Any]:
+    run_id_value = safe_run_id(body.get("run_id") or "latest")
+    request_body = {**body, "request_id": request_id(body) or run_id_value, "run_id": run_id_value}
+    try:
+        result = retry_run(
+            project_root=PROJECT_ROOT,
+            output_root=AGENT_OUTPUT_DIR,
+            run_id=run_id_value,
+            new_run_id=body.get("new_run_id"),
+            overrides=body.get("overrides") or {},
+        )
+        child = result.get("run") or {}
+        return ok(request_body, result, usage=child.get("usage"), cost=child.get("cost"), route=child.get("route_decision"))
+    except FileNotFoundError as exc:
+        return failed(request_body, "agent_run_not_found", str(exc))
+    except ValueError as exc:
+        return failed(request_body, "invalid_agent_run", str(exc))
+
+
+@app.post("/v1/agent/resume")
+def agent_resume_api(body: dict[str, Any]) -> dict[str, Any]:
+    run_id_value = safe_run_id(body.get("run_id") or "latest")
+    request_body = {**body, "request_id": request_id(body) or run_id_value, "run_id": run_id_value}
+    try:
+        result = resume_run(
+            project_root=PROJECT_ROOT,
+            output_root=AGENT_OUTPUT_DIR,
+            run_id=run_id_value,
+            new_run_id=body.get("new_run_id"),
+            overrides=body.get("overrides") or {},
+            allow_completed=bool(body.get("allow_completed")),
+        )
+        child = result.get("run") or {}
+        return ok(request_body, result, usage=child.get("usage"), cost=child.get("cost"), route=child.get("route_decision"))
+    except FileNotFoundError as exc:
+        return failed(request_body, "agent_run_not_found", str(exc))
+    except ValueError as exc:
+        return failed(request_body, "invalid_agent_run", str(exc))
 
 
 @app.post("/v1/chat")
