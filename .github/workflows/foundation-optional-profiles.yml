@@ -1,0 +1,100 @@
+name: Foundation Optional Profiles
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Optional CI profile to run"
+        required: true
+        default: "optional"
+        type: choice
+        options:
+          - optional
+          - provider-adapter
+          - api-server
+          - local-provider-contract
+          - heavyweight
+          - local-model-imports
+          - all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: foundation-optional-profiles-${{ github.ref }}-${{ inputs.profile }}
+  cancel-in-progress: true
+
+jobs:
+  provider-adapter:
+    name: Provider adapter contract
+    if: ${{ inputs.profile == 'optional' || inputs.profile == 'provider-adapter' || inputs.profile == 'all' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qwen-novel2drama-llm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Show CI profile
+        run: python scripts/ci_profiles.py --profile provider-adapter
+      - name: Install provider adapter dependencies
+        run: python -m pip install -r requirements/provider-adapter.txt
+      - name: Run provider adapter tests
+        run: python -m unittest tests.test_provider_adapter_contract tests.test_provider_factory tests.test_provider_continuation
+
+  api-server:
+    name: API server profile
+    if: ${{ inputs.profile == 'optional' || inputs.profile == 'api-server' || inputs.profile == 'all' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qwen-novel2drama-llm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Show CI profile
+        run: python scripts/ci_profiles.py --profile api-server
+      - name: Install API server dependencies
+        run: python -m pip install -r requirements/api-server.txt
+      - name: Run API server tests
+        run: python -m unittest tests.test_api_server_foundation
+
+  local-provider-contract:
+    name: Local provider contract
+    if: ${{ inputs.profile == 'optional' || inputs.profile == 'local-provider-contract' || inputs.profile == 'all' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qwen-novel2drama-llm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Show CI profile
+        run: python scripts/ci_profiles.py --profile local-provider-contract
+      - name: Run local provider mock tests
+        run: python -m unittest tests.test_local_text_provider
+
+  local-model-imports:
+    name: Heavy local model dependency imports
+    if: ${{ inputs.profile == 'heavyweight' || inputs.profile == 'local-model-imports' || inputs.profile == 'all' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qwen-novel2drama-llm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Show CI profile
+        run: python scripts/ci_profiles.py --profile local-model-imports
+      - name: Install local model dependencies
+        run: python -m pip install -r requirements/local-model.txt
+      - name: Import heavyweight model dependencies
+        run: python -c "import importlib; [importlib.import_module(name) for name in ['torch', 'transformers', 'peft', 'accelerate', 'sentencepiece', 'safetensors']]; print('import_check=ok')"
