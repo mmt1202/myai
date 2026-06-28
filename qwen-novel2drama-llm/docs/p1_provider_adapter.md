@@ -14,6 +14,7 @@ Implemented files:
 - `tests/test_provider_adapter_contract.py`
 - `tests/test_provider_factory.py`
 - `tests/test_local_text_provider.py`
+- `tests/test_provider_continuation.py`
 
 ## Base provider contract
 
@@ -25,9 +26,13 @@ Implemented files:
 - `response_envelope`
 - `normalize_usage`
 - `provider_stream_event`
+- `continuation_capability`
 - `chunk_text`
 - `BaseProvider.generate`
 - `BaseProvider.stream_generate`
+- `BaseProvider.continuation_capability`
+- `BaseProvider.supports_bidirectional_tool_continuation`
+- `BaseProvider.continue_stream_with_tool_result`
 
 The base contract standardizes:
 
@@ -36,6 +41,8 @@ The base contract standardizes:
 - provider usage normalization
 - provider error normalization
 - provider stream chunk shape
+- provider continuation capability reporting
+- provider-native same-stream continuation hook
 - capability checks
 - modality checks
 
@@ -57,10 +64,51 @@ Supported event types:
 - `provider_stream_started`
 - `provider_stream_delta`
 - `provider_stream_tool_call_delta`
+- `provider_stream_tool_result`
+- `provider_stream_continuation_unsupported`
+- `provider_stream_continuation_failed`
 - `provider_stream_completed`
 - `provider_stream_failed`
 
 The completed event can include final `output`, `usage` and reconstructed `tool_calls`.
+
+## Same-stream tool-result continuation contract
+
+Providers can report whether they support provider-native bidirectional continuation:
+
+```python
+provider.continuation_capability()
+provider.supports_bidirectional_tool_continuation()
+```
+
+Default provider behavior is unsupported:
+
+```text
+protocol = unsupported
+mode = fallback_next_provider_request
+```
+
+The provider hook is:
+
+```python
+provider.continue_stream_with_tool_result(request, tool_call, tool_result, stream_context)
+```
+
+Current built-in providers use the default unsupported implementation. Agent can still request `same_stream_tool_result_injection`; unsupported providers emit `provider_stream_continuation_unsupported` and fall back to the normal next-provider-request tool loop.
+
+Model instances can declare future native support under runtime config:
+
+```json
+{
+  "runtime_config": {
+    "bidirectional_tool_continuation": {
+      "supported": true,
+      "protocol": "provider-specific-realtime",
+      "mode": "provider_native"
+    }
+  }
+}
+```
 
 ## OpenAI-compatible provider
 
@@ -95,52 +143,13 @@ MODEL_API_KEY=your_key python providers/openai_compatible.py \
   --stream
 ```
 
-Optional stream usage request:
-
-```json
-{
-  "stream": true,
-  "stream_include_usage": true
-}
-```
-
-This sets:
-
-```json
-{
-  "stream_options": {"include_usage": true}
-}
-```
-
-when building the OpenAI-compatible payload.
-
 Tool call streaming behavior:
 
 ```text
-delta.tool_calls[index].id              -> tool_calls[index].id
-delta.tool_calls[index].type            -> tool_calls[index].type
-delta.tool_calls[index].function.name   -> appended function.name
-delta.tool_calls[index].function.arguments -> appended function.arguments
-```
-
-The final completed event can include:
-
-```json
-{
-  "output": {
-    "tool_calls": [
-      {
-        "id": "call_...",
-        "type": "function",
-        "function": {
-          "name": "foundation.token_count",
-          "arguments": "{\"request\":{\"input\":[]}}"
-        },
-        "arguments_json": {"request": {"input": []}}
-      }
-    ]
-  }
-}
+delta.tool_calls[index].id                    -> tool_calls[index].id
+delta.tool_calls[index].type                  -> tool_calls[index].type
+delta.tool_calls[index].function.name         -> appended function.name
+delta.tool_calls[index].function.arguments    -> appended function.arguments
 ```
 
 The provider adapter reconstructs tool calls. `/v1/chat` does not execute them; Agent can bridge them into the model tool loop with `stream_provider_tool_calls`. Agent can also execute complete partial streamed tool calls early with `incremental_stream_tool_execution` when the partial includes a name and JSON-decodable arguments.
@@ -187,19 +196,6 @@ FOUNDATION_LOCAL_ADAPTER_PATH
 FOUNDATION_LOCAL_SYSTEM_PROMPT
 ```
 
-Runtime cache helpers:
-
-- `cache_stats()`
-- `clear_model_cache()`
-- `local_cache_key()`
-
-CLI cache helpers:
-
-```bash
-python providers/local_text.py --request examples/provider_request.json --cache-stats
-python providers/local_text.py --request examples/provider_request.json --clear-cache --cache-stats
-```
-
 Streaming local provider through CLI:
 
 ```bash
@@ -219,104 +215,18 @@ python providers/factory.py \
   --stream
 ```
 
-Real local execution requires `model_path` in the request or `FOUNDATION_LOCAL_MODEL_PATH`.
-
-## Provider factory
-
-`providers/factory.py` can:
-
-- find a model instance by id or alias
-- build a provider from model instance metadata
-- call OpenAI-compatible providers
-- call local transformers providers
-- call a provider through `generate_with_registry`
-- stream a provider through `stream_generate_with_registry`
-- return standard response envelopes on provider errors
-
-Agent's model tool loop can convert stream chunks into a normal provider response, then consume reconstructed tool calls through the same tool execution path. Incremental Agent execution can additionally inspect `provider_stream_tool_call_delta` chunks during the stream and execute a tool call once arguments are complete.
-
-## Dry run
+Check provider continuation capability through factory:
 
 ```bash
-python providers/openai_compatible.py \
-  --request examples/provider_request.json \
-  --base-url http://localhost:8000/v1
-```
-
-Request field:
-
-```json
-{
-  "dry_run": true,
-  "request_id": "demo",
-  "input": [{"type": "text", "text": "hello"}]
-}
-```
-
-Provider-level dry-run alias:
-
-```json
-{
-  "dry_run_provider": true
-}
-```
-
-## Real provider call
-
-OpenAI-compatible:
-
-```bash
-MODEL_API_KEY=your_key python providers/openai_compatible.py \
-  --request examples/provider_request.json \
-  --base-url https://provider.example/v1
-```
-
-OpenAI-compatible streaming:
-
-```bash
-MODEL_API_KEY=your_key python providers/factory.py \
-  --request examples/provider_request.json \
-  --instances configs/model_instance_registry.json \
-  --model-id external.openai_compatible.smart \
-  --base-url https://provider.example/v1 \
-  --stream
-```
-
-Local transformers:
-
-```bash
-FOUNDATION_LOCAL_MODEL_PATH=/path/to/model python providers/factory.py \
-  --request examples/provider_request.json \
-  --instances configs/model_instance_registry.json \
-  --model-id local.qwen2_5_1_5b_instruct
-```
-
-Local transformers streaming:
-
-```bash
-FOUNDATION_LOCAL_MODEL_PATH=/path/to/model python providers/factory.py \
+python providers/factory.py \
   --request examples/provider_request.json \
   --instances configs/model_instance_registry.json \
   --model-id local.qwen2_5_1_5b_instruct \
-  --stream
+  --continuation-capability
 ```
 
 ## Current limitations
 
-- Local provider is text-only.
-- Local provider loads model weights in-process.
-- Local cache is process-local, not distributed.
-- Generation serialization is per-process, not cluster-wide.
-- Streamed tool-call reconstruction supports OpenAI-style function tool calls only.
-- Incremental Agent execution requires complete JSON arguments.
-- Incremental Agent execution does not inject tool results back into the same open provider stream.
-- Image/video/audio generation adapters are not implemented yet.
-- Provider-specific tokenizer reconciliation is not implemented yet.
-- Provider health probing is still basic.
-
-## Next steps
-
-- Add provider usage reconciliation after provider calls.
-- Add local provider warmup endpoint.
-- Add local provider memory-pressure eviction policy.
-- Add image/video/audio provider adapter interfaces.
+- Built-in providers do not yet implement provider-native same-stream continuation.
+- Same-stream tool-result injection currently emits auditable fallback events and uses the next-provider-request loop.
+- Provider-specific realtime protocols still need dedicated adapters.
