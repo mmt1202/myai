@@ -143,7 +143,7 @@ The final completed event can include:
 }
 ```
 
-The provider adapter reconstructs tool calls. `/v1/chat` does not execute them; Agent can bridge them into the model tool loop with `stream_provider_tool_calls`.
+The provider adapter reconstructs tool calls. `/v1/chat` does not execute them; Agent can bridge them into the model tool loop with `stream_provider_tool_calls`. Agent can also execute complete partial streamed tool calls early with `incremental_stream_tool_execution` when the partial includes a name and JSON-decodable arguments.
 
 ## Local text provider
 
@@ -233,7 +233,7 @@ Real local execution requires `model_path` in the request or `FOUNDATION_LOCAL_M
 - stream a provider through `stream_generate_with_registry`
 - return standard response envelopes on provider errors
 
-Agent's model tool loop can convert stream chunks into a normal provider response, then consume reconstructed tool calls through the same tool execution path.
+Agent's model tool loop can convert stream chunks into a normal provider response, then consume reconstructed tool calls through the same tool execution path. Incremental Agent execution can additionally inspect `provider_stream_tool_call_delta` chunks during the stream and execute a tool call once arguments are complete.
 
 ## Dry run
 
@@ -308,14 +308,14 @@ FOUNDATION_LOCAL_MODEL_PATH=/path/to/model python providers/factory.py \
 - Local cache is process-local, not distributed.
 - Generation serialization is per-process, not cluster-wide.
 - Streamed tool-call reconstruction supports OpenAI-style function tool calls only.
-- Agent bridge waits for the provider stream to complete before executing reconstructed tool calls.
+- Incremental Agent execution requires complete JSON arguments.
+- Incremental Agent execution does not inject tool results back into the same open provider stream.
 - Image/video/audio generation adapters are not implemented yet.
 - Provider-specific tokenizer reconciliation is not implemented yet.
 - Provider health probing is still basic.
 
 ## Next steps
 
-- Add live incremental tool execution while provider stream is still open.
 - Add provider usage reconciliation after provider calls.
 - Add local provider warmup endpoint.
 - Add local provider memory-pressure eviction policy.
