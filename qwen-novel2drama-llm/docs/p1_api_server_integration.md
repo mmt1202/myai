@@ -214,7 +214,7 @@ Local provider cache and concurrency controls:
 
 ## Agent provider execution, tool loops and live events
 
-`/v1/agent/run` supports provider execution, request-defined skill calls, model-decided tool calls and run events through `agent/runtime.py`.
+`/v1/agent/run` supports provider execution, request-defined skill calls, model-decided tool calls, stream tool-call bridging, incremental stream tool execution and run events through `agent/runtime.py`.
 
 Provider preflight only:
 
@@ -291,6 +291,22 @@ Streamed provider tool-call bridge:
 
 When the bridge is enabled, Agent writes `provider_stream_chunks.jsonl`, converts the final stream completion into a normal provider response, then executes reconstructed `output.tool_calls` through the existing model tool loop. Follow-up provider rounds can also be streamed and written to `model_tool_loop_stream_round_<n>.jsonl`.
 
+Incremental stream tool execution:
+
+```json
+{
+  "task": "use tools as soon as arguments are complete",
+  "route_mode": "smart",
+  "approval_policy": "never",
+  "execute_provider": true,
+  "enable_model_tool_loop": true,
+  "stream_provider_tool_calls": true,
+  "incremental_stream_tool_execution": true
+}
+```
+
+When enabled, Agent executes a streamed tool call as soon as the partial has both a tool name and JSON-decodable arguments. It writes `incremental_tool_results.json` and reuses those results in the final model tool loop to avoid duplicate execution.
+
 Agent events are written to:
 
 ```text
@@ -313,7 +329,7 @@ GET /v1/agent/events?run_id=demo-run&stream=true
 
 - Agent SSE currently polls the JSONL event file.
 - `/v1/chat` provider streaming is SSE only, not WebSocket.
-- Streamed provider tool-call bridge waits for provider completion before executing tools.
+- Incremental stream execution does not inject tool results back into the same open provider stream.
 - Model-decided tool loop is synchronous.
 - Tool names must map to registered foundation skill ids.
 - Local provider is text-only and loads weights in-process.
@@ -324,7 +340,7 @@ GET /v1/agent/events?run_id=demo-run&stream=true
 
 ## Next steps
 
-- Add live incremental tool execution while provider stream is still open.
+- Add same-stream tool result injection or provider-supported bidirectional tool continuation.
 - Add workspace-level budget and quota checks.
 - Add distributed rate limiting backend.
 - Add resume/cancel/retry for Agent runs.
