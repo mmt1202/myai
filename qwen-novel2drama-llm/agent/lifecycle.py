@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.events import AgentEventWriter
-from agent.run_store import FileRunStore, RunNotFoundError, file_run_store, marker_for_cancel
+from agent.run_store import FileRunStore, RunNotFoundError, RunStore, file_run_store, marker_for_cancel, run_store_from_config
 from agent.runtime import run_agent_once, now_iso
 
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
@@ -59,7 +59,7 @@ def original_request_from_report(report: dict[str, Any]) -> dict[str, Any]:
     return request
 
 
-def load_original_request(output_root: Path, run_id: str, store: FileRunStore | None = None) -> dict[str, Any]:
+def load_original_request(output_root: Path, run_id: str, store: RunStore | None = None) -> dict[str, Any]:
     active_store = store or file_run_store(output_root)
     try:
         return active_store.load_request(run_id)
@@ -67,22 +67,39 @@ def load_original_request(output_root: Path, run_id: str, store: FileRunStore | 
         return original_request_from_report(active_store.load_report(run_id))
 
 
-def status_run(output_root: Path, run_id: str, store: FileRunStore | None = None) -> dict[str, Any]:
+def status_run(output_root: Path, run_id: str, store: RunStore | None = None) -> dict[str, Any]:
     active_store = store or file_run_store(output_root)
     return active_store.status(run_id)
 
 
-def write_lifecycle_event(output_root: Path, run_id: str, report: dict[str, Any], event_type: str, *, status: str, message: str | None = None, data: dict[str, Any] | None = None, error: str | None = None, store: FileRunStore | None = None) -> None:
+def write_lifecycle_event(output_root: Path, run_id: str, report: dict[str, Any], event_type: str, *, status: str, message: str | None = None, data: dict[str, Any] | None = None, error: str | None = None, store: RunStore | None = None) -> None:
     active_store = store or file_run_store(output_root)
+    event = {
+        **{
+            "run_id": report.get("run_id"),
+            "session_id": report.get("session_id"),
+            "owner_id": report.get("owner_id"),
+            "project_id": report.get("project_id"),
+        },
+        "event_type": event_type,
+        "status": status,
+        "message": message,
+        "data": data or {},
+        "error": error,
+    }
+    if hasattr(active_store, "append_event"):
+        getattr(active_store, "append_event")(run_id, event)
+        return
     writer = AgentEventWriter(active_store.artifact_path(run_id, "events.jsonl"), report, enabled=True)
     writer.emit(event_type, status=status, message=message, data=data or {}, error=error)
 
 
-def cancel_run(output_root: Path, run_id: str, *, reason: str | None = None, requested_by: str | None = None, store: FileRunStore | None = None) -> dict[str, Any]:
+def cancel_run(output_root: Path, run_id: str, *, reason: str | None = None, requested_by: str | None = None, store: RunStore | None = None) -> dict[str, Any]:
     active_store = store or file_run_store(output_root)
     safe_id = active_store.safe_run_id(run_id)
     directory = active_store.run_dir(safe_id)
-    directory.mkdir(parents=True, exist_ok=True)
+    if active_store.metadata().get("type") == "file":
+        directory.mkdir(parents=True, exist_ok=True)
     marker = marker_for_cancel(safe_id, reason=reason, requested_by=requested_by)
     active_store.save_cancel_request(safe_id, marker)
     try:
@@ -136,7 +153,7 @@ def retry_run(
     run_id: str,
     new_run_id: str | None = None,
     overrides: dict[str, Any] | None = None,
-    store: FileRunStore | None = None,
+    store: RunStore | None = None,
 ) -> dict[str, Any]:
     active_store = store or file_run_store(output_root)
     safe_id = active_store.safe_run_id(run_id)
@@ -144,6 +161,9 @@ def retry_run(
     request = restart_request(safe_id, original, action="retry", new_run_id=new_run_id, overrides=overrides)
     child_dir = active_store.run_dir(request["run_id"])
     run = run_agent_once(project_root, request, child_dir)
+    if active_store.metadata().get("type") != "file":
+        active_store.save_request(request["run_id"], request)
+        active_store.save_report(request["run_id"], run)
     return {"action": "retry", "source_run_id": safe_id, "new_run_id": request["run_id"], "run": run, "run_store": active_store.metadata()}
 
 
@@ -155,7 +175,7 @@ def resume_run(
     new_run_id: str | None = None,
     overrides: dict[str, Any] | None = None,
     allow_completed: bool = False,
-    store: FileRunStore | None = None,
+    store: RunStore | None = None,
 ) -> dict[str, Any]:
     active_store = store or file_run_store(output_root)
     safe_id = active_store.safe_run_id(run_id)
@@ -166,6 +186,9 @@ def resume_run(
     request = restart_request(safe_id, original, action="resume", new_run_id=new_run_id, overrides=overrides)
     child_dir = active_store.run_dir(request["run_id"])
     run = run_agent_once(project_root, request, child_dir)
+    if active_store.metadata().get("type") != "file":
+        active_store.save_request(request["run_id"], request)
+        active_store.save_report(request["run_id"], run)
     return {"action": "resume", "source_run_id": safe_id, "new_run_id": request["run_id"], "source_status": report.get("status"), "run": run, "run_store": active_store.metadata()}
 
 
@@ -179,7 +202,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Manage Agent run lifecycle through the configured run store: status, cancel, retry and resume.")
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--output-root", default="outputs/agent_runtime/api")
-    parser.add_argument("--run-store", choices=["file"], default="file")
+    parser.add_argument("--run-store", choices=["file", "sqlite"], default="file")
+    parser.add_argument("--sqlite-path", default=None)
     sub = parser.add_subparsers(dest="command", required=True)
 
     status_parser = sub.add_parser("status")
@@ -204,7 +228,7 @@ def main() -> int:
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
     output_root = Path(args.output_root)
-    store = file_run_store(output_root)
+    store = run_store_from_config(store_type=args.run_store, output_root=output_root, sqlite_path=Path(args.sqlite_path) if args.sqlite_path else None)
     if args.command == "status":
         result = status_run(output_root, args.run_id, store)
     elif args.command == "cancel":

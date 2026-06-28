@@ -155,6 +155,8 @@ class FoundationContractsTests(unittest.TestCase):
             "AgentLifecycleResponse:",
             "new_run_id:",
             "allow_completed:",
+            "run_store:",
+            "sqlite_path:",
             "cancel_requested:",
             "source_run_id:",
         ]:

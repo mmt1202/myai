@@ -128,18 +128,72 @@ Because lifecycle functions now use the run store abstraction, those APIs are al
 
 This keeps the file-backed store from path traversal.
 
+
+## SQLite-backed implementation
+
+`SQLiteRunStore` is a local database-backed implementation that uses Python standard-library `sqlite3` only. It is intended for single-node/local persistence and testable lifecycle state, not for distributed leases or Postgres-scale coordination.
+
+Implemented files:
+
+- `agent/sqlite_run_store.py`
+- `tests/test_sqlite_run_store.py`
+
+Factory:
+
+```python
+sqlite_run_store(db_path)
+```
+
+Required tables are created automatically when the store is constructed:
+
+```text
+runs
+run_requests
+run_reports
+run_events
+cancel_requests
+run_artifacts
+```
+
+Minimum persisted fields:
+
+```text
+runs: run_id, status, created_at, updated_at, completed_at, error
+run_requests: run_id, request_json
+run_reports: run_id, report_json
+run_events: run_id, event_id, event_type, status, created_at, event_json
+cancel_requests: run_id, marker_json, created_at
+run_artifacts: run_id, name, path, artifact_json
+```
+
+Core operations supported in v1:
+
+- `save_request(run_id, request)` / `load_request(run_id)`
+- `save_report(run_id, report)` / `load_report(run_id)`
+- `append_event(run_id, event)` / `load_events(run_id)` / `event_summary(run_id)`
+- `save_cancel_request(run_id, marker)` / `load_cancel_request(run_id)` / `cancel_requested(run_id)`
+- `save_artifact(run_id, name, artifact, path=None)` for database-backed artifact index entries
+- `status(run_id)` with the same high-level shape as `FileRunStore.status()` and `run_store.type = "sqlite"`
+
+Missing runs or missing request/report records raise `RunNotFoundError` so callers can treat SQLite and file-backed stores consistently.
+
+Current SQLite limitations:
+
+- `SQLiteRunStore` can be selected by lifecycle CLI/API for local database-backed run state.
+- Runtime artifact writes still primarily use file paths directly.
+- This is not a distributed run store and does not provide cross-process leases, worker ownership, queueing, or Postgres compatibility.
+
 ## Current limitations
 
-- The only implemented store is `FileRunStore`.
+- Implemented stores are `FileRunStore` and local `SQLiteRunStore`.
 - Runtime writes still use file paths directly; lifecycle reads/writes now go through the store abstraction.
-- No SQLite/Postgres implementation yet.
+- No Postgres implementation yet; SQLite is local-only and not distributed.
 - No transaction, lock, lease or distributed concurrency control yet.
 - No run listing/query index yet.
 - Event streaming still reads JSONL files.
 
 ## Next steps
 
-- Add `SQLiteRunStore` as a local database-backed implementation.
 - Add run listing and query filters.
 - Migrate runtime artifact writes to the store interface.
 - Add DB-backed Agent events and lifecycle status reads.

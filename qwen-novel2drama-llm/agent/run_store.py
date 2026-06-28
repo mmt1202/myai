@@ -4,7 +4,7 @@ import json
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agent.events import read_agent_events, summarize_agent_events
 from agent.runtime import CANCEL_REQUEST_FILENAME, now_iso, save_json
@@ -176,3 +176,18 @@ def marker_for_cancel(run_id: str, *, reason: str | None = None, requested_by: s
 
 def file_run_store(output_root: Path) -> FileRunStore:
     return FileRunStore(output_root)
+
+
+def run_store_from_config(
+    *,
+    store_type: Literal["file", "sqlite"] = "file",
+    output_root: Path,
+    sqlite_path: Path | None = None,
+) -> RunStore:
+    if store_type == "file":
+        return file_run_store(output_root)
+    if store_type == "sqlite":
+        from agent.sqlite_run_store import sqlite_run_store
+
+        return sqlite_run_store(sqlite_path or (output_root / "runs.sqlite3"))
+    raise ValueError(f"unsupported run store type: {store_type}")

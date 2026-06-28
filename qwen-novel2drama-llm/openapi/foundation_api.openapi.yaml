@@ -149,6 +149,8 @@ paths:
       operationId: getAgentStatus
       parameters:
         - {in: query, name: run_id, required: false, schema: {type: string, default: latest}}
+        - {in: query, name: run_store, required: false, schema: {type: string, enum: [file, sqlite], default: file}}
+        - {in: query, name: sqlite_path, required: false, schema: {type: string}}
       responses:
         '200': {description: Agent lifecycle status response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/agent/cancel:
@@ -353,6 +355,8 @@ components:
         owner_id: {type: string}
         project_id: {type: string}
         workspace_id: {type: string}
+        run_store: {type: string, enum: [file, sqlite], default: file}
+        sqlite_path: {type: string}
         task: {type: string}
         input: {type: array, items: {$ref: '#/components/schemas/ContentBlock'}}
         route_mode: {type: string, enum: [smart, cheap, balanced, local_first, cloud_first, drama_specialist, code_specialist]}
@@ -399,6 +403,8 @@ components:
         trace_id: {type: string}
         workspace_id: {type: string}
         run_id: {type: string}
+        run_store: {type: string, enum: [file, sqlite], default: file}
+        sqlite_path: {type: string}
         new_run_id: {type: string}
         reason: {type: string}
         requested_by: {type: string}
@@ -420,6 +426,7 @@ components:
         artifacts: {type: object, additionalProperties: true}
         event_summary: {type: object, additionalProperties: true}
         run: {type: object, additionalProperties: true}
+        run_store: {type: object, additionalProperties: true}
       additionalProperties: true
     AgentEvent:
       type: object

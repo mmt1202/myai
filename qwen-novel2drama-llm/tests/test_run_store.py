@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.events import write_agent_event
-from agent.run_store import FileRunStore, RunNotFoundError, file_run_store, marker_for_cancel
+from agent.run_store import FileRunStore, RunNotFoundError, file_run_store, marker_for_cancel, run_store_from_config
 from agent.runtime import run_agent_once, save_json
 
 
@@ -20,6 +20,16 @@ class RunStoreTests(unittest.TestCase):
         for value in ["", "../x", "a/b", "a\\b"]:
             with self.assertRaises(ValueError):
                 store.safe_run_id(value)
+
+    def test_run_store_factory_selects_file_and_sqlite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir)
+            file_store = run_store_from_config(store_type="file", output_root=output_root)
+            sqlite_store = run_store_from_config(store_type="sqlite", output_root=output_root, sqlite_path=output_root / "runs.db")
+            self.assertEqual(file_store.metadata()["type"], "file")
+            self.assertEqual(sqlite_store.metadata()["type"], "sqlite")
+            with self.assertRaises(ValueError):
+                run_store_from_config(store_type="unknown", output_root=output_root)  # type: ignore[arg-type]
 
     def test_file_run_store_reads_and_writes_core_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

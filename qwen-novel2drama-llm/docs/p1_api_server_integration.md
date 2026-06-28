@@ -138,11 +138,20 @@ FileRunStore
 file_run_store(output_root)
 ```
 
-The current API server uses `FileRunStore` under:
+The API server defaults to `FileRunStore` under:
 
 ```text
 outputs/agent_runtime/api/<run_id>/
 ```
+
+It can also select local SQLite-backed run state with:
+
+```text
+MYAI_AGENT_RUN_STORE=sqlite
+MYAI_AGENT_SQLITE_RUN_STORE_PATH=outputs/agent_runtime/api/runs.sqlite3
+```
+
+For lifecycle calls, request bodies may set `run_store: "sqlite"` and `sqlite_path`; status may pass `run_store` and `sqlite_path` as query parameters.
 
 Status:
 
@@ -190,19 +199,21 @@ POST /v1/agent/resume
 
 All lifecycle endpoints use `agent:run` auth scope.
 
+Run-store selection is intentionally local-only in this phase: `file` remains the default, and `sqlite` uses the standard-library `SQLiteRunStore`. This does not provide distributed worker leasing or Postgres semantics.
+
 Current lifecycle behavior:
 
-- `status` reads `agent_run_report.json` and `events.jsonl` through `FileRunStore`.
-- `cancel` writes `cancel_requested.json` through `FileRunStore` and updates non-terminal reports to `cancelled`.
-- `retry` loads `agent_request.json`, merges overrides, and creates a child run with `retry_of`.
-- `resume` loads `agent_request.json`, merges overrides, and creates a child run with `resume_of`.
+- `status` reads through the selected run store.
+- `cancel` writes a cancel marker through the selected run store and updates non-terminal reports to `cancelled`.
+- `retry` loads the saved request from the selected run store, merges overrides, creates a child run with `retry_of`, and persists the child request/report back into SQLite when SQLite is selected.
+- `resume` loads the saved request from the selected run store, merges overrides, creates a child run with `resume_of`, and persists the child request/report back into SQLite when SQLite is selected.
 
 ## Current limitations
 
 - Agent SSE currently polls the JSONL event file.
-- `FileRunStore` is the only implemented run store.
+- `FileRunStore` and local `SQLiteRunStore` are implemented run stores.
 - Runtime writes still use file paths directly; lifecycle reads/writes use the store boundary.
-- No SQLite/Postgres run store yet.
+- No Postgres run store yet; SQLite is local-only.
 - No transaction, lock, lease or distributed concurrency control yet.
 - Cancel is cooperative and does not forcibly terminate an in-flight provider call.
 - Retry/resume are replay-based child runs, not arbitrary stack-frame continuation.
@@ -215,7 +226,7 @@ Current lifecycle behavior:
 
 ## Next steps
 
-- Add SQLite/Postgres run store implementation.
+- Add Postgres run store implementation and distributed lease semantics.
 - Migrate runtime artifact writes to the run store interface.
 - Add distributed quota/rate limit backend.
 - Add provider-native bidirectional continuation adapter.

@@ -123,6 +123,32 @@ class FoundationApiServerTests(unittest.TestCase):
             finally:
                 api_server.AGENT_OUTPUT_DIR = original
 
+    def test_agent_lifecycle_sqlite_run_store_api(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_output = api_server.AGENT_OUTPUT_DIR
+            original_store = api_server.AGENT_RUN_STORE_TYPE
+            original_sqlite = api_server.AGENT_SQLITE_RUN_STORE_PATH
+            api_server.AGENT_OUTPUT_DIR = Path(tmpdir) / "runs"
+            api_server.AGENT_RUN_STORE_TYPE = "sqlite"
+            api_server.AGENT_SQLITE_RUN_STORE_PATH = Path(tmpdir) / "runs.sqlite3"
+            try:
+                run_result = api_server.agent_run_api({"run_id": "demo", "task": "hello", "route_mode": "balanced", "privacy": {"local_only": True}, "approval_policy": "never"})
+                self.assertEqual(run_result["status"], "ok")
+                self.assertEqual(run_result["output"]["run_store"]["type"], "sqlite")
+
+                status_result = api_server.agent_status_api(run_id="demo")
+                self.assertEqual(status_result["status"], "ok")
+                self.assertEqual(status_result["output"]["run_store"]["type"], "sqlite")
+                self.assertEqual(status_result["output"]["status"], "completed")
+
+                cancel_result = api_server.agent_cancel_api({"run_id": "cancel_me", "reason": "user_requested", "run_store": "sqlite"})
+                self.assertEqual(cancel_result["status"], "ok")
+                self.assertEqual(cancel_result["output"]["run_store"]["type"], "sqlite")
+            finally:
+                api_server.AGENT_OUTPUT_DIR = original_output
+                api_server.AGENT_RUN_STORE_TYPE = original_store
+                api_server.AGENT_SQLITE_RUN_STORE_PATH = original_sqlite
+
     def test_agent_lifecycle_missing_run_returns_failed_envelope(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             original = api_server.AGENT_OUTPUT_DIR

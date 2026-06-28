@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import importlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -24,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from agent.events import read_agent_events, summarize_agent_events
 from agent.lifecycle import cancel_run, resume_run, retry_run, status_run
+from agent.run_store import RunStore, run_store_from_config
 from agent.runtime import run_agent_once
 from inference.model_router import route_model
 from mcp.adapter import FoundationMCPAdapter
@@ -46,6 +48,8 @@ ACTIVE_MODEL_VERSION: str | None = None
 ACTIVE_MODEL_PATH: str | None = None
 MEMORY_STORE_PATH = PROJECT_ROOT / "outputs" / "memory" / "memory.jsonl"
 AGENT_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "agent_runtime" / "api"
+AGENT_RUN_STORE_TYPE = os.environ.get("MYAI_AGENT_RUN_STORE", "file")
+AGENT_SQLITE_RUN_STORE_PATH = Path(os.environ.get("MYAI_AGENT_SQLITE_RUN_STORE_PATH", str(AGENT_OUTPUT_DIR / "runs.sqlite3")))
 AUTH_AUDIT_PATH = PROJECT_ROOT / "outputs" / "auth" / "auth_audit.jsonl"
 TERMINAL_AGENT_EVENTS = {"run_completed", "run_failed", "run_cancelled", "run_waiting_approval"}
 
@@ -127,6 +131,18 @@ def agent_output_dir_for(body: dict[str, Any]) -> Path:
 
 def agent_events_path(run_id: str | None) -> Path:
     return AGENT_OUTPUT_DIR / safe_run_id(run_id) / "events.jsonl"
+
+
+def agent_run_store(store_type: str | None = None, sqlite_path: str | None = None) -> RunStore:
+    selected = str(store_type or AGENT_RUN_STORE_TYPE or "file").strip().lower()
+    if selected not in {"file", "sqlite"}:
+        raise ValueError(f"unsupported run store type: {selected}")
+    db_path = Path(sqlite_path) if sqlite_path else AGENT_SQLITE_RUN_STORE_PATH
+    return run_store_from_config(store_type=selected, output_root=AGENT_OUTPUT_DIR, sqlite_path=db_path)
+
+
+def agent_run_store_for_body(body: dict[str, Any]) -> RunStore:
+    return agent_run_store(body.get("run_store"), body.get("sqlite_path"))
 
 
 def events_after(events: list[dict[str, Any]], since_event_id: str | None = None) -> list[dict[str, Any]]:
@@ -406,11 +422,19 @@ def mcp_call_api(body: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/v1/agent/run")
 def agent_run_api(body: dict[str, Any]) -> dict[str, Any]:
-    run = run_agent_once(PROJECT_ROOT, body, agent_output_dir_for(body))
-    return ok(body, {"run": run}, usage=run.get("usage"), cost=run.get("cost"), route=run.get("route_decision"))
+    store = agent_run_store_for_body(body)
+    run_id_value = safe_run_id(request_id(body) or body.get("run_id") or "latest")
+    run = run_agent_once(PROJECT_ROOT, body, store.run_dir(run_id_value))
+    if store.metadata().get("type") != "file":
+        store.save_request(run_id_value, body)
+        store.save_report(run_id_value, run)
+        for event in read_agent_events(store.artifact_path(run_id_value, "events.jsonl")):
+            if hasattr(store, "append_event"):
+                getattr(store, "append_event")(run_id_value, event)
+    return ok(body, {"run": run, "run_store": store.metadata()}, usage=run.get("usage"), cost=run.get("cost"), route=run.get("route_decision"))
 
 
-@app.get("/v1/agent/events")
+@app.get("/v1/agent/events", response_model=None)
 def agent_events_api(run_id: str = "latest", stream: bool = False, since_event_id: str | None = None, limit: int = 200, poll_interval: float = 1.0, max_seconds: int = 60) -> dict[str, Any] | StreamingResponse:
     safe_id = safe_run_id(run_id)
     if stream:
@@ -428,11 +452,11 @@ def agent_events_api(run_id: str = "latest", stream: bool = False, since_event_i
 
 
 @app.get("/v1/agent/status")
-def agent_status_api(run_id: str = "latest") -> dict[str, Any]:
+def agent_status_api(run_id: str = "latest", run_store: str | None = None, sqlite_path: str | None = None) -> dict[str, Any]:
     safe_id = safe_run_id(run_id)
     body = {"request_id": safe_id, "run_id": safe_id}
     try:
-        result = status_run(AGENT_OUTPUT_DIR, safe_id)
+        result = status_run(AGENT_OUTPUT_DIR, safe_id, store=agent_run_store(run_store, sqlite_path))
         return ok(body, result)
     except FileNotFoundError as exc:
         return failed(body, "agent_run_not_found", str(exc))
@@ -450,6 +474,7 @@ def agent_cancel_api(body: dict[str, Any]) -> dict[str, Any]:
             run_id_value,
             reason=body.get("reason"),
             requested_by=body.get("requested_by") or body.get("owner_id"),
+            store=agent_run_store_for_body(body),
         )
         return ok(request_body, result)
     except ValueError as exc:
@@ -467,6 +492,7 @@ def agent_retry_api(body: dict[str, Any]) -> dict[str, Any]:
             run_id=run_id_value,
             new_run_id=body.get("new_run_id"),
             overrides=body.get("overrides") or {},
+            store=agent_run_store_for_body(body),
         )
         child = result.get("run") or {}
         return ok(request_body, result, usage=child.get("usage"), cost=child.get("cost"), route=child.get("route_decision"))
@@ -488,6 +514,7 @@ def agent_resume_api(body: dict[str, Any]) -> dict[str, Any]:
             new_run_id=body.get("new_run_id"),
             overrides=body.get("overrides") or {},
             allow_completed=bool(body.get("allow_completed")),
+            store=agent_run_store_for_body(body),
         )
         child = result.get("run") or {}
         return ok(request_body, result, usage=child.get("usage"), cost=child.get("cost"), route=child.get("route_decision"))
@@ -497,7 +524,7 @@ def agent_resume_api(body: dict[str, Any]) -> dict[str, Any]:
         return failed(request_body, "invalid_agent_run", str(exc))
 
 
-@app.post("/v1/chat")
+@app.post("/v1/chat", response_model=None)
 def chat_api(body: dict[str, Any]) -> dict[str, Any] | StreamingResponse:
     registry = model_instances()
     route = route_model({**body, "required_capabilities": body.get("required_capabilities") or ["text.chat"]}, registry)
@@ -522,12 +549,12 @@ def chat_api(body: dict[str, Any]) -> dict[str, Any] | StreamingResponse:
     return result
 
 
-@app.post("/v1/reason")
+@app.post("/v1/reason", response_model=None)
 def reason_api(body: dict[str, Any]) -> dict[str, Any] | StreamingResponse:
     return chat_api({**body, "required_capabilities": body.get("required_capabilities") or ["text.reason"], "expected_reasoning_tokens": body.get("expected_reasoning_tokens") or 512})
 
 
-@app.post("/v1/multimodal/analyze")
+@app.post("/v1/multimodal/analyze", response_model=None)
 def multimodal_analyze_api(body: dict[str, Any]) -> dict[str, Any] | StreamingResponse:
     return chat_api({**body, "required_capabilities": body.get("required_capabilities") or ["vision.understand"]})
 
