@@ -331,6 +331,7 @@ components:
         execute_provider: {type: boolean, default: false}
         dry_run_provider: {type: boolean, default: false}
         enable_model_tool_loop: {type: boolean, default: false}
+        stream_provider_tool_calls: {type: boolean, default: false}
         max_tool_rounds: {type: integer, default: 3}
         allow_model_tool_provider: {type: boolean, default: false}
         allow_model_tool_write: {type: boolean, default: false}
@@ -345,6 +346,8 @@ components:
         disable_cache: {type: boolean, default: false}
         serialize_generation: {type: boolean, default: true}
         stream: {type: boolean, default: false}
+        stream_include_usage: {type: boolean, default: false}
+        stream_options: {type: object, additionalProperties: true}
         stream_chunk_chars: {type: integer, default: 128}
         force_chunked_stream: {type: boolean, default: false}
         skill_calls: {type: array, items: {$ref: '#/components/schemas/AgentSkillCall'}}
