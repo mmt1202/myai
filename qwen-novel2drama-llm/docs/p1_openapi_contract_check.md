@@ -26,6 +26,8 @@ It also checks that important OpenAPI sections and fields are present, including
 - `ProviderToolCall`
 - `AgentRunRequest`
 - `AgentSkillCall`
+- `AgentLifecycleRequest`
+- `AgentLifecycleResponse`
 - `AgentEvent`
 - `AgentEventsResponse`
 - provider execution fields
@@ -35,9 +37,10 @@ It also checks that important OpenAPI sections and fields are present, including
 - streamed tool-call reconstruction fields such as `provider_stream_tool_call_delta`, `tool_calls` and `arguments_json`
 - request-driven skill loop fields
 - model tool loop fields
+- Agent lifecycle endpoints and fields such as `/v1/agent/status`, `/v1/agent/cancel`, `/v1/agent/retry`, `/v1/agent/resume`, `new_run_id` and `allow_completed`
 - Agent event stream fields such as `disable_events` and `text/event-stream`
 
-Current required runtime endpoints include `GET /v1/agent/events`.
+Current required runtime endpoints include `GET /v1/agent/events`, `GET /v1/agent/status`, `POST /v1/agent/cancel`, `POST /v1/agent/retry` and `POST /v1/agent/resume`.
 
 ## Run locally
 
@@ -115,7 +118,7 @@ python -m unittest tests.test_foundation_core_services tests.test_memory_store t
 
 ## Purpose
 
-The foundation API now includes router, token/cost, memory, rules, skills, MCP, API key mode, provider execution, provider streaming, streamed tool-call reconstruction, Agent stream tool bridge, incremental stream tool execution, same-stream continuation fallback events, workspace quota controls, Agent tool loop controls and live Agent event reads.
+The foundation API now includes router, token/cost, memory, rules, skills, MCP, API key mode, provider execution, provider streaming, streamed tool-call reconstruction, Agent stream tool bridge, incremental stream tool execution, same-stream continuation fallback events, workspace quota controls, Agent tool loop controls, Agent lifecycle API controls and live Agent event reads.
 
 This check helps keep runtime routes and the static OpenAPI file consistent as the API changes while keeping heavyweight provider/model dependency checks in separate opt-in profiles.
 
