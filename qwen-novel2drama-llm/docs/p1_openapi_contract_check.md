@@ -28,6 +28,7 @@ It also checks that important OpenAPI sections and fields are present, including
 - `AgentEventsResponse`
 - provider execution fields
 - provider streaming fields such as `stream`, `stream_provider_tool_calls`, `incremental_stream_tool_execution`, `stream_include_usage`, `stream_options`, `stream_chunk_chars` and provider stream events
+- workspace quota fields such as `workspace_quota_enabled`, `workspace_quota_config_path` and `workspace_quota_state_path`
 - streamed tool-call reconstruction fields such as `provider_stream_tool_call_delta`, `tool_calls` and `arguments_json`
 - request-driven skill loop fields
 - model tool loop fields
@@ -84,12 +85,12 @@ Current CI commands:
 ```bash
 python scripts/check_openapi_contract.py
 python -m unittest tests.test_openapi_contract_check tests.test_foundation_contracts
-python -m unittest tests.test_foundation_core_services tests.test_memory_store tests.test_rule_engine tests.test_auth_service tests.test_auth_audit_rate_limit tests.test_usage_reconciliation tests.test_skill_registry tests.test_mcp_adapter
+python -m unittest tests.test_foundation_core_services tests.test_memory_store tests.test_rule_engine tests.test_auth_service tests.test_auth_audit_rate_limit tests.test_usage_reconciliation tests.test_workspace_quota tests.test_skill_registry tests.test_mcp_adapter
 ```
 
 ## Purpose
 
-The foundation API now includes router, token/cost, memory, rules, skills, MCP, API key mode, provider execution, provider streaming, streamed tool-call reconstruction, Agent stream tool bridge, incremental stream tool execution, Agent tool loop controls and live Agent event reads.
+The foundation API now includes router, token/cost, memory, rules, skills, MCP, API key mode, provider execution, provider streaming, streamed tool-call reconstruction, Agent stream tool bridge, incremental stream tool execution, workspace quota controls, Agent tool loop controls and live Agent event reads.
 
 This check helps keep runtime routes and the static OpenAPI file consistent as the API changes.
 
