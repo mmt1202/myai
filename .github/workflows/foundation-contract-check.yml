@@ -1,0 +1,73 @@
+name: Foundation Contract Check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "qwen-novel2drama-llm/**"
+      - ".github/workflows/foundation-contract-check.yml"
+  pull_request:
+    paths:
+      - "qwen-novel2drama-llm/**"
+      - ".github/workflows/foundation-contract-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: foundation-contract-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  openapi-contract:
+    name: OpenAPI/runtime contract
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qwen-novel2drama-llm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check OpenAPI contract
+        run: python scripts/check_openapi_contract.py
+
+      - name: Run contract unit tests
+        run: |
+          python -m unittest \
+            tests.test_openapi_contract_check \
+            tests.test_foundation_contracts
+
+  lightweight-core-tests:
+    name: Dependency-free core tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qwen-novel2drama-llm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run dependency-free service tests
+        run: |
+          python -m unittest \
+            tests.test_foundation_core_services \
+            tests.test_memory_store \
+            tests.test_rule_engine \
+            tests.test_auth_service \
+            tests.test_auth_audit_rate_limit \
+            tests.test_usage_reconciliation \
+            tests.test_skill_registry \
+            tests.test_mcp_adapter
