@@ -69,6 +69,10 @@ class FoundationContractsTests(unittest.TestCase):
             "/v1/mcp/call",
             "/v1/agent/run",
             "/v1/agent/events",
+            "/v1/agent/status",
+            "/v1/agent/cancel",
+            "/v1/agent/retry",
+            "/v1/agent/resume",
         ]:
             self.assertIn(endpoint, text)
 
@@ -141,6 +145,18 @@ class FoundationContractsTests(unittest.TestCase):
             "event_type:",
             "since_event_id",
             "text/event-stream",
+        ]:
+            self.assertIn(field, text)
+
+    def test_openapi_agent_schema_contains_lifecycle_fields(self) -> None:
+        text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
+        for field in [
+            "AgentLifecycleRequest:",
+            "AgentLifecycleResponse:",
+            "new_run_id:",
+            "allow_completed:",
+            "cancel_requested:",
+            "source_run_id:",
         ]:
             self.assertIn(field, text)
 
