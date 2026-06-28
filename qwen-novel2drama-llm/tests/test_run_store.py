@@ -9,8 +9,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.events import write_agent_event
-from agent.run_store import FileRunStore, RunNotFoundError, file_run_store, marker_for_cancel
+from agent.run_store import FileRunStore, RunNotFoundError, build_run_store, default_sqlite_path, file_run_store, marker_for_cancel, normalize_run_store_kind
 from agent.runtime import run_agent_once, save_json
+from agent.sqlite_run_store import SQLiteRunStore
 
 
 class RunStoreTests(unittest.TestCase):
@@ -78,6 +79,31 @@ class RunStoreTests(unittest.TestCase):
             store = file_run_store(output_root)
             store.save_cancel_request("demo", marker_for_cancel("demo"))
             self.assertTrue(store.status("demo")["cancel_requested"])
+
+    def test_normalize_run_store_kind_aliases(self) -> None:
+        self.assertEqual(normalize_run_store_kind(None), "file")
+        self.assertEqual(normalize_run_store_kind("file-backed"), "file")
+        self.assertEqual(normalize_run_store_kind("sqlite3"), "sqlite")
+        self.assertEqual(normalize_run_store_kind("sqlite_run_store"), "sqlite")
+
+    def test_build_run_store_selects_file_or_sqlite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir)
+            self.assertIsInstance(build_run_store("file", output_root), FileRunStore)
+            sqlite = build_run_store("sqlite", output_root, sqlite_path=output_root / "runs.db")
+            self.assertIsInstance(sqlite, SQLiteRunStore)
+            self.assertEqual(sqlite.metadata()["db_path"], str(output_root / "runs.db"))
+
+    def test_build_run_store_uses_default_sqlite_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir)
+            store = build_run_store("sqlite", output_root)
+            self.assertEqual(store.metadata()["db_path"], str(default_sqlite_path(output_root)))
+
+    def test_build_run_store_rejects_unknown_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertRaises(ValueError):
+                build_run_store("unknown", Path(tmpdir))
 
 
 if __name__ == "__main__":
