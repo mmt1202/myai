@@ -10,6 +10,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.lifecycle import cancel_run, resume_run, retry_run, status_run
 from agent.runtime import run_agent_once, save_json
+from agent.sqlite_run_store import sqlite_run_store
 
 
 class AgentLifecycleTests(unittest.TestCase):
@@ -97,6 +98,32 @@ class AgentLifecycleTests(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 resume_run(project_root=PROJECT_ROOT, output_root=output_root, run_id="demo", new_run_id="demo_resume")
+
+    def test_status_cancel_retry_resume_with_sqlite_store(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+            output_root = Path(tmpdir)
+            store = sqlite_run_store(output_root / "runs.sqlite")
+            request = {"run_id": "demo", "task": "hello", "route_mode": "balanced", "privacy": {"local_only": True}, "approval_policy": "never"}
+            run = run_agent_once(PROJECT_ROOT, request, store.run_dir("demo"))
+            store.save_request("demo", request)
+            store.save_report("demo", run)
+
+            status = status_run(output_root, "demo", store=store)
+            self.assertEqual(status["run_store"]["type"], "sqlite")
+            self.assertEqual(status["status"], "completed")
+
+            cancel = cancel_run(output_root, "cancel_me", reason="stop", store=store)
+            self.assertEqual(cancel["run_store"]["type"], "sqlite")
+            self.assertTrue(store.cancel_requested("cancel_me"))
+
+            retry = retry_run(project_root=PROJECT_ROOT, output_root=output_root, run_id="demo", new_run_id="demo_retry", overrides={"task": "retry sqlite"}, store=store)
+            self.assertEqual(retry["run_store"]["type"], "sqlite")
+            self.assertEqual(store.load_request("demo_retry")["task"], "retry sqlite")
+            self.assertEqual(store.status("demo_retry")["status"], "completed")
+
+            resume = resume_run(project_root=PROJECT_ROOT, output_root=output_root, run_id="demo", new_run_id="demo_resume", allow_completed=True, store=store)
+            self.assertEqual(resume["run_store"]["type"], "sqlite")
+            self.assertEqual(store.status("demo_resume")["status"], "completed")
 
 
 if __name__ == "__main__":
