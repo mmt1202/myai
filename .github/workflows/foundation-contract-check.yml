@@ -39,11 +39,11 @@ jobs:
       - name: Check OpenAPI contract
         run: python scripts/check_openapi_contract.py
 
+      - name: Show CI profile
+        run: python scripts/ci_profiles.py --profile contracts
+
       - name: Run contract unit tests
-        run: |
-          python -m unittest \
-            tests.test_openapi_contract_check \
-            tests.test_foundation_contracts
+        run: python -m unittest tests.test_openapi_contract_check tests.test_foundation_contracts
 
   lightweight-core-tests:
     name: Dependency-free core tests
@@ -59,6 +59,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Show CI profile
+        run: python scripts/ci_profiles.py --profile core
 
       - name: Run dependency-free service tests
         run: |
