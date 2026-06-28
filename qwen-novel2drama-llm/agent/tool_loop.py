@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from providers.factory import generate_with_registry, stream_generate_with_registry
+from services.model_tool_loop_usage import aggregate_model_tool_loop_usage, apply_aggregation_to_provider_response
 from skills.registry import SkillError, call_skill
 
 
@@ -274,6 +275,29 @@ def generate_provider_round(
     return response
 
 
+def finalize_model_tool_loop_summary(
+    *,
+    output_dir: Path,
+    initial_provider_response: dict[str, Any],
+    summary: dict[str, Any],
+    instances: dict[str, Any],
+    selected_model_id: str,
+) -> dict[str, Any]:
+    aggregation = aggregate_model_tool_loop_usage(
+        initial_provider_response=initial_provider_response,
+        model_tool_loop_summary=summary,
+        instances_registry=instances,
+        selected_model_id=selected_model_id,
+    )
+    final_response = summary.get("final_provider_response") or initial_provider_response
+    if isinstance(final_response, dict) and final_response.get("status") == "ok":
+        summary["final_provider_response"] = apply_aggregation_to_provider_response(final_response, aggregation)
+    summary["usage_aggregation"] = aggregation
+    save_json(output_dir / "model_tool_loop_usage_aggregation.json", aggregation)
+    save_json(output_dir / "model_tool_loop.json", summary)
+    return summary
+
+
 def run_model_tool_loop(
     *,
     project_root: Path,
@@ -315,9 +339,21 @@ def run_model_tool_loop(
                 )
             round_results.append({"tool_call": tool_call, "result": result})
             if result.get("status") != "ok" and fail_on_tool_error:
-                summary = {"rounds": rounds + [{"round": round_index + 1, "tool_results": round_results}], "status": "failed", "error": result.get("error"), "stream_provider_tool_calls": use_stream, "incremental_stream_tool_execution": incremental_stream}
-                save_json(output_dir / "model_tool_loop.json", summary)
-                return summary
+                summary = {
+                    "rounds": rounds + [{"round": round_index + 1, "tool_results": round_results}],
+                    "status": "failed",
+                    "error": result.get("error"),
+                    "initial_provider_response": initial_provider_response,
+                    "stream_provider_tool_calls": use_stream,
+                    "incremental_stream_tool_execution": incremental_stream,
+                }
+                return finalize_model_tool_loop_summary(
+                    output_dir=output_dir,
+                    initial_provider_response=initial_provider_response,
+                    summary=summary,
+                    instances=instances,
+                    selected_model_id=selected_model_id,
+                )
         next_request = build_next_provider_request(current_request, selected_model_id, round_results)
         next_request["dry_run"] = bool(request.get("dry_run_provider"))
         next_request["stream_include_usage"] = request.get("stream_include_usage")
@@ -347,6 +383,19 @@ def run_model_tool_loop(
         )
         current_request = next_request
         current_response = next_response
-    summary = {"status": "ok", "round_count": len(rounds), "rounds": rounds, "final_provider_response": current_response, "stream_provider_tool_calls": use_stream, "incremental_stream_tool_execution": incremental_stream}
-    save_json(output_dir / "model_tool_loop.json", summary)
-    return summary
+    summary = {
+        "status": "ok",
+        "round_count": len(rounds),
+        "rounds": rounds,
+        "initial_provider_response": initial_provider_response,
+        "final_provider_response": current_response,
+        "stream_provider_tool_calls": use_stream,
+        "incremental_stream_tool_execution": incremental_stream,
+    }
+    return finalize_model_tool_loop_summary(
+        output_dir=output_dir,
+        initial_provider_response=initial_provider_response,
+        summary=summary,
+        instances=instances,
+        selected_model_id=selected_model_id,
+    )
