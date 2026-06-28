@@ -94,6 +94,7 @@ class FoundationContractsTests(unittest.TestCase):
             "provider_stream_tool_call_delta",
             "provider_stream_completed",
             "provider_stream_failed",
+            "stream_provider_tool_calls:",
             "stream_include_usage:",
             "stream_options:",
             "stream_chunk_chars:",
