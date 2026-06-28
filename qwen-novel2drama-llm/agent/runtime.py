@@ -13,6 +13,7 @@ from inference.model_router import route_model
 from providers.base import ProviderError
 from services.rule_engine import evaluate_rules, load_rules
 from services.usage_ledger import write_event
+from services.usage_reconciliation import reconcile_provider_usage, reconciled_cost, reconciled_usage
 from skills.registry import SkillError, call_skill
 
 RUN_STATES = {"queued", "running", "waiting_tool", "waiting_approval", "completed", "failed", "cancelled"}
@@ -67,6 +68,7 @@ def create_run(request: dict[str, Any]) -> dict[str, Any]:
         "skill_results": [],
         "model_tool_loop": None,
         "provider_response": None,
+        "usage_reconciliation": None,
         "event_summary": {},
         "usage": {},
         "cost": {},
@@ -207,6 +209,32 @@ def record_usage(output_dir: Path, run: dict[str, Any], provider_response: dict[
     )
 
 
+def apply_usage_reconciliation(
+    output_dir: Path,
+    run: dict[str, Any],
+    route_decision: dict[str, Any],
+    provider_response: dict[str, Any],
+    instances: dict[str, Any],
+    *,
+    filename: str = "provider_usage_reconciliation.json",
+) -> dict[str, Any]:
+    report = reconcile_provider_usage(
+        request_id=provider_response.get("request_id") or run.get("run_id"),
+        trace_id=provider_response.get("trace_id") or run.get("run_id"),
+        route_decision=route_decision,
+        provider_response=provider_response,
+        instances_registry=instances,
+    )
+    provider_response["usage_reconciliation"] = report
+    provider_response["usage"] = reconciled_usage(report) or provider_response.get("usage") or {}
+    provider_response["cost"] = reconciled_cost(report) or provider_response.get("cost") or {}
+    run["usage_reconciliation"] = report
+    run["usage"] = provider_response["usage"]
+    run["cost"] = provider_response["cost"]
+    save_json(output_dir / filename, report)
+    return report
+
+
 def normalize_skill_call(call: dict[str, Any]) -> dict[str, Any]:
     name = call.get("name") or call.get("skill_id")
     if not name:
@@ -296,10 +324,15 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
         approved=bool(request.get("approve_model_tools")),
     )
     run["provider_response"] = response
-    if response.get("usage"):
-        run["usage"] = response["usage"]
-    if response.get("cost"):
-        run["cost"] = response["cost"]
+    if response.get("status") == "ok":
+        report = apply_usage_reconciliation(output_dir, run, route_decision, response, instances)
+        if events:
+            events.emit("usage_reconciled", status="completed", data={"model_id": selected_model_id, "usage_source": report.get("usage_source"), "summary": report.get("summary") or {}})
+    else:
+        if response.get("usage"):
+            run["usage"] = response["usage"]
+        if response.get("cost"):
+            run["cost"] = response["cost"]
     save_json(output_dir / "provider_response.json", response)
     record_usage(output_dir, run, provider_response=response)
     step = add_step(run, "provider_generate", input_data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run"), "stream_provider_tool_calls": use_stream, "incremental_stream_tool_execution": incremental_stream}, output_data=response, status="completed" if response.get("status") == "ok" else "failed")
@@ -334,6 +367,11 @@ def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[st
     run["model_tool_loop"] = summary
     if summary.get("final_provider_response"):
         run["provider_response"] = summary["final_provider_response"]
+        if (run["provider_response"] or {}).get("status") == "ok":
+            final_report = apply_usage_reconciliation(output_dir, run, route_decision, run["provider_response"], instances, filename="provider_usage_reconciliation_final.json")
+            save_json(output_dir / "provider_response_final.json", run["provider_response"])
+            if events:
+                events.emit("usage_reconciled", status="completed", data={"model_id": selected_model_id, "scope": "model_tool_loop_final", "usage_source": final_report.get("usage_source"), "summary": final_report.get("summary") or {}})
     if (run.get("provider_response") or {}).get("usage"):
         run["usage"] = run["provider_response"]["usage"]
     if (run.get("provider_response") or {}).get("cost"):
@@ -355,6 +393,12 @@ def attach_artifacts(output_dir: Path, run: dict[str, Any]) -> None:
     }
     if run.get("provider_response"):
         run["artifacts"]["provider_response"] = str(output_dir / "provider_response.json")
+    if (output_dir / "provider_response_final.json").exists():
+        run["artifacts"]["provider_response_final"] = str(output_dir / "provider_response_final.json")
+    if (output_dir / "provider_usage_reconciliation.json").exists():
+        run["artifacts"]["provider_usage_reconciliation"] = str(output_dir / "provider_usage_reconciliation.json")
+    if (output_dir / "provider_usage_reconciliation_final.json").exists():
+        run["artifacts"]["provider_usage_reconciliation_final"] = str(output_dir / "provider_usage_reconciliation_final.json")
     if (run.get("provider_response") or {}).get("stream_chunks_path"):
         run["artifacts"]["provider_stream_chunks"] = str((run.get("provider_response") or {}).get("stream_chunks_path"))
     if (run.get("provider_response") or {}).get("incremental_tool_results_path"):
