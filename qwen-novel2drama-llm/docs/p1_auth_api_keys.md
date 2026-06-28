@@ -104,6 +104,15 @@ Current endpoint scopes:
 
 The wildcard scope `*` grants all scopes.
 
+`agent:run` covers:
+
+- `POST /v1/agent/run`
+- `GET /v1/agent/events`
+- `GET /v1/agent/status`
+- `POST /v1/agent/cancel`
+- `POST /v1/agent/retry`
+- `POST /v1/agent/resume`
+
 ## Audit log
 
 The API middleware writes auth events to:
@@ -183,6 +192,7 @@ These endpoints do not require API keys even when auth is enabled:
 - This is API key based auth, not full OAuth/OIDC.
 - Key store is file based.
 - Rate limit state is file based.
+- Agent lifecycle APIs are protected by scope but still use file-backed run state.
 - No distributed rate limiting yet.
 - No key rotation workflow yet.
 - No request body workspace binding yet.
@@ -191,7 +201,6 @@ These endpoints do not require API keys even when auth is enabled:
 ## Next steps
 
 - Add API key generation and rotation helper.
-- Add workspace-level budget and quota checks.
 - Add request-body workspace binding.
 - Add distributed rate limiting backend.
 - Add provider/model quota checks.
