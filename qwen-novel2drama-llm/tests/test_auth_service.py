@@ -49,6 +49,10 @@ class AuthServiceTests(unittest.TestCase):
         self.assertEqual(required_scope_for("POST", "/v1/chat"), "model:invoke")
         self.assertEqual(required_scope_for("POST", "/v1/memory/write"), "memory:write")
         self.assertEqual(required_scope_for("GET", "/v1/agent/events"), "agent:run")
+        self.assertEqual(required_scope_for("GET", "/v1/agent/status"), "agent:run")
+        self.assertEqual(required_scope_for("POST", "/v1/agent/cancel"), "agent:run")
+        self.assertEqual(required_scope_for("POST", "/v1/agent/retry"), "agent:run")
+        self.assertEqual(required_scope_for("POST", "/v1/agent/resume"), "agent:run")
         self.assertIsNone(required_scope_for("GET", "/v1/health"))
 
     def test_authorize_admin_wildcard(self) -> None:
