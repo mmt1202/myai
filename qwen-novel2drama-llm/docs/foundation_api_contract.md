@@ -213,6 +213,7 @@ Stream fields:
 - `stream_include_usage`
 - `stream_options`
 - `stream_provider_tool_calls`
+- `incremental_stream_tool_execution`
 
 `/v1/chat` returns `text/event-stream` when `stream=true` and `execute_provider=true`.
 
@@ -234,13 +235,13 @@ provider_stream_completed.output.tool_calls
 
 `stream_provider_tool_calls` makes Agent provider execution collect stream chunks, convert the completed stream into a provider response, and pass reconstructed tool calls into the existing model tool loop.
 
-The stream bridge is synchronous and waits for provider completion before executing tools.
+`incremental_stream_tool_execution` lets Agent execute a streamed tool call before stream completion once `function.name` and JSON-decodable `function.arguments` are complete. The result is stored and reused by the final tool loop to avoid duplicate execution.
 
 The default is route/cost preflight only.
 
 ## Agent run and event controls
 
-`/v1/agent/run` supports request-driven skill calls, model-decided tool calls, provider execution and event artifacts.
+`/v1/agent/run` supports request-driven skill calls, model-decided tool calls, provider execution, streamed tool-call bridging, incremental stream tool execution and event artifacts.
 
 Request-driven skill calls use `skill_calls`.
 
@@ -261,6 +262,7 @@ Model-decided tool loop fields:
 
 - `enable_model_tool_loop`
 - `stream_provider_tool_calls`
+- `incremental_stream_tool_execution`
 - `max_tool_rounds`
 - `allow_model_tool_provider`
 - `allow_model_tool_write`
@@ -291,10 +293,10 @@ Applications can use these capabilities later through the same routing and API l
 
 ## Next implementation step
 
-After provider stream tool-call bridge v1, continue with:
+After incremental stream tool execution v1, continue with:
 
-1. live incremental tool execution while provider stream is still open
-2. provider usage reconciliation
-3. workspace-level budget and quota checks
-4. CI contract check
-5. distributed rate limiting backend
+1. provider usage reconciliation
+2. workspace-level budget and quota checks
+3. CI contract check
+4. distributed rate limiting backend
+5. Agent resume/cancel/retry
