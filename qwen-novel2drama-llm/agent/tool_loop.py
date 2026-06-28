@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from providers.factory import generate_with_registry
+from providers.factory import generate_with_registry, stream_generate_with_registry
 from skills.registry import SkillError, call_skill
 
 
@@ -15,6 +15,11 @@ def load_json(path: Path) -> dict[str, Any]:
 def save_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def save_jsonl(path: Path, items: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in items), encoding="utf-8")
 
 
 def parse_arguments(value: Any) -> dict[str, Any]:
@@ -58,6 +63,8 @@ def normalize_tool_call(item: dict[str, Any]) -> dict[str, Any]:
     if not name:
         raise SkillError("tool call requires name or function.name")
     arguments = item.get("arguments")
+    if arguments is None:
+        arguments = item.get("arguments_json")
     if arguments is None:
         arguments = function.get("arguments")
     return {
@@ -103,6 +110,76 @@ def build_next_provider_request(base_request: dict[str, Any], selected_model_id:
     return next_request
 
 
+def provider_response_from_stream_chunks(chunks: list[dict[str, Any]]) -> dict[str, Any]:
+    failed = next((item for item in chunks if item.get("event_type") == "provider_stream_failed"), None)
+    if failed:
+        return {
+            "request_id": failed.get("request_id"),
+            "trace_id": failed.get("trace_id"),
+            "status": "failed",
+            "model": failed.get("model") or {},
+            "usage": failed.get("usage") or {},
+            "output": failed.get("output") or {},
+            "error": failed.get("error") or {"code": "provider_stream_failed", "message": "provider stream failed", "retryable": False, "details": {}},
+            "stream": {"chunk_count": len(chunks), "completed": False},
+        }
+    completed = next((item for item in reversed(chunks) if item.get("event_type") == "provider_stream_completed"), None)
+    if not completed:
+        return {
+            "status": "failed",
+            "usage": {},
+            "output": {},
+            "error": {"code": "provider_stream_incomplete", "message": "provider stream did not emit a completed event", "retryable": True, "details": {"chunk_count": len(chunks)}},
+            "stream": {"chunk_count": len(chunks), "completed": False},
+        }
+    return {
+        "request_id": completed.get("request_id"),
+        "trace_id": completed.get("trace_id"),
+        "status": "ok",
+        "model": completed.get("model") or {},
+        "usage": completed.get("usage") or {},
+        "output": completed.get("output") or {},
+        "warnings": [],
+        "error": None,
+        "stream": {"chunk_count": len(chunks), "completed": True, "tool_call_count": (completed.get("metadata") or {}).get("tool_call_count", 0)},
+    }
+
+
+def generate_provider_round(
+    request: dict[str, Any],
+    instances: dict[str, Any],
+    *,
+    selected_model_id: str,
+    base_url: str | None = None,
+    api_key_env: str = "MODEL_API_KEY",
+    stream: bool = False,
+    stream_chunks_path: Path | None = None,
+) -> dict[str, Any]:
+    if not stream:
+        return generate_with_registry(
+            request,
+            instances,
+            model_id=selected_model_id,
+            base_url=base_url,
+            api_key_env=api_key_env,
+        )
+    stream_request = {**request, "stream": True}
+    chunks = list(
+        stream_generate_with_registry(
+            stream_request,
+            instances,
+            model_id=selected_model_id,
+            base_url=base_url,
+            api_key_env=api_key_env,
+        )
+    )
+    if stream_chunks_path:
+        save_jsonl(stream_chunks_path, chunks)
+    response = provider_response_from_stream_chunks(chunks)
+    response["stream_chunks_path"] = str(stream_chunks_path) if stream_chunks_path else None
+    return response
+
+
 def run_model_tool_loop(
     *,
     project_root: Path,
@@ -119,6 +196,7 @@ def run_model_tool_loop(
     allow_write = bool(request.get("allow_model_tool_write"))
     approved = bool(request.get("approve_model_tools"))
     fail_on_tool_error = bool(request.get("fail_on_model_tool_error", True))
+    use_stream = bool(request.get("stream_provider_tool_calls"))
     current_response = initial_provider_response
     current_request = {**foundation_request, "model_id": selected_model_id, "model": selected_model_id}
     rounds: list[dict[str, Any]] = []
@@ -137,17 +215,21 @@ def run_model_tool_loop(
             )
             round_results.append({"tool_call": tool_call, "result": result})
             if result.get("status") != "ok" and fail_on_tool_error:
-                summary = {"rounds": rounds + [{"round": round_index + 1, "tool_results": round_results}], "status": "failed", "error": result.get("error")}
+                summary = {"rounds": rounds + [{"round": round_index + 1, "tool_results": round_results}], "status": "failed", "error": result.get("error"), "stream_provider_tool_calls": use_stream}
                 save_json(output_dir / "model_tool_loop.json", summary)
                 return summary
         next_request = build_next_provider_request(current_request, selected_model_id, round_results)
         next_request["dry_run"] = bool(request.get("dry_run_provider"))
-        next_response = generate_with_registry(
+        next_request["stream_include_usage"] = request.get("stream_include_usage")
+        next_request["stream_options"] = request.get("stream_options")
+        next_response = generate_provider_round(
             next_request,
             instances,
-            model_id=selected_model_id,
+            selected_model_id=selected_model_id,
             base_url=request.get("base_url"),
             api_key_env=request.get("api_key_env") or "MODEL_API_KEY",
+            stream=use_stream,
+            stream_chunks_path=output_dir / f"model_tool_loop_stream_round_{round_index + 1}.jsonl" if use_stream else None,
         )
         rounds.append(
             {
@@ -159,6 +241,6 @@ def run_model_tool_loop(
         )
         current_request = next_request
         current_response = next_response
-    summary = {"status": "ok", "round_count": len(rounds), "rounds": rounds, "final_provider_response": current_response}
+    summary = {"status": "ok", "round_count": len(rounds), "rounds": rounds, "final_provider_response": current_response, "stream_provider_tool_calls": use_stream}
     save_json(output_dir / "model_tool_loop.json", summary)
     return summary
