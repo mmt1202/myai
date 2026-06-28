@@ -9,10 +9,12 @@ Implemented files:
 - `agent/events.py`
 - `agent/tool_loop.py`
 - `agent/lifecycle.py`
+- `inference/api_server.py`
 - `tests/test_agent_runtime.py`
 - `tests/test_agent_events.py`
 - `tests/test_agent_tool_loop.py`
 - `tests/test_agent_lifecycle.py`
+- `tests/test_api_server_foundation.py`
 - `tests/test_provider_continuation.py`
 
 ## Run states
@@ -103,6 +105,24 @@ GET /v1/agent/events?run_id=demo&stream=true
 - `retry`
 - `resume`
 
+CLI examples:
+
+```bash
+python agent/lifecycle.py --output-root outputs/agent_runtime/api status --run-id demo
+python agent/lifecycle.py --output-root outputs/agent_runtime/api cancel --run-id demo --reason user_requested
+python agent/lifecycle.py --project-root . --output-root outputs/agent_runtime/api retry --run-id demo --new-run-id demo_retry
+python agent/lifecycle.py --project-root . --output-root outputs/agent_runtime/api resume --run-id demo --new-run-id demo_resume --overrides '{"skill_calls": []}'
+```
+
+API endpoints:
+
+```text
+GET  /v1/agent/status?run_id=demo
+POST /v1/agent/cancel
+POST /v1/agent/retry
+POST /v1/agent/resume
+```
+
 Cancel writes:
 
 ```text
@@ -156,13 +176,6 @@ For each model-decided tool call, the runtime:
 6. calls the provider again
 7. repeats until no more tool calls or `max_tool_rounds` is reached
 
-Model tool-loop permissions:
-
-- `allow_model_tool_provider`
-- `allow_model_tool_write`
-- `approve_model_tools`
-- `fail_on_model_tool_error`
-
 The runtime writes:
 
 - `model_tool_loop.json`
@@ -183,14 +196,7 @@ The runtime writes:
 }
 ```
 
-With this enabled, the runtime:
-
-1. calls the selected provider through `stream_generate_with_registry`
-2. writes raw provider stream chunks to `provider_stream_chunks.jsonl`
-3. converts the final `provider_stream_completed` chunk into a standard provider response
-4. reads `output.tool_calls` from that response
-5. executes matching foundation skills through the existing model tool loop
-6. optionally streams follow-up provider rounds and writes `model_tool_loop_stream_round_<n>.jsonl`
+With this enabled, the runtime writes raw provider stream chunks to `provider_stream_chunks.jsonl`, converts the final `provider_stream_completed` chunk into a standard provider response, and executes reconstructed `output.tool_calls` through the existing model tool loop.
 
 ## Incremental stream tool execution
 
@@ -205,21 +211,7 @@ With this enabled, the runtime:
 }
 ```
 
-With this enabled, the runtime:
-
-1. listens for `provider_stream_tool_call_delta` chunks
-2. reads `metadata.tool_call_partial`
-3. waits until `function.name` and complete JSON `function.arguments` are available
-4. executes the matching foundation skill immediately
-5. records the result in `incremental_tool_results.json`
-6. emits `provider_stream_tool_result`
-7. reuses the pre-executed result in the final model tool loop to avoid duplicate tool calls
-
-For streamed follow-up rounds, it writes:
-
-```text
-model_tool_loop_incremental_round_<n>.json
-```
+With this enabled, the runtime emits `provider_stream_tool_result`, writes `incremental_tool_results.json`, and reuses pre-executed results in the final model tool loop to avoid duplicate tool calls.
 
 ## Same-stream tool-result injection contract
 
@@ -234,12 +226,6 @@ model_tool_loop_incremental_round_<n>.json
   "same_stream_tool_result_injection": true
 }
 ```
-
-Provider adapters now expose:
-
-- `continuation_capability()`
-- `supports_bidirectional_tool_continuation()`
-- `continue_stream_with_tool_result(...)`
 
 Stream events added for this contract:
 
@@ -285,11 +271,12 @@ When same-stream continuation is requested, `provider_stream_chunks.jsonl` may a
 
 ## Current limitations
 
+- Agent lifecycle APIs are file-backed, not database-backed.
+- Cancel is cooperative and checkpoint-based; it does not forcibly terminate an in-flight provider call.
+- Retry/resume are replay-based and create a child run; they do not continue from an arbitrary internal Python stack frame.
 - Same-stream tool-result injection is capability-gated; current providers default to unsupported.
 - Unsupported providers fall back to next-provider-request continuation.
 - No provider-native bidirectional streaming adapter is implemented yet.
-- Cancel is cooperative and checkpoint-based; it does not forcibly terminate an in-flight provider call.
-- Retry/resume are replay-based and create a child run; they do not continue from an arbitrary internal Python stack frame.
 - Tool execution is still synchronous.
 - Stream chunks are stored as JSONL files, not a distributed event log.
 - Lifecycle state is file-backed, not a distributed run database.
