@@ -153,7 +153,7 @@ When the remote stream contains `delta.tool_calls`, the provider adapter reconst
 provider_stream_completed.output.tool_calls
 ```
 
-The adapter does not execute reconstructed tool calls by itself.
+`/v1/chat` does not execute reconstructed tool calls. Agent execution can bridge them when `stream_provider_tool_calls` is enabled.
 
 ## Local provider execution
 
@@ -275,6 +275,22 @@ Model-decided tool loop execution:
 }
 ```
 
+Streamed provider tool-call bridge:
+
+```json
+{
+  "task": "use tools if needed",
+  "route_mode": "smart",
+  "approval_policy": "never",
+  "execute_provider": true,
+  "enable_model_tool_loop": true,
+  "stream_provider_tool_calls": true,
+  "stream_include_usage": true
+}
+```
+
+When the bridge is enabled, Agent writes `provider_stream_chunks.jsonl`, converts the final stream completion into a normal provider response, then executes reconstructed `output.tool_calls` through the existing model tool loop. Follow-up provider rounds can also be streamed and written to `model_tool_loop_stream_round_<n>.jsonl`.
+
 Agent events are written to:
 
 ```text
@@ -297,7 +313,7 @@ GET /v1/agent/events?run_id=demo-run&stream=true
 
 - Agent SSE currently polls the JSONL event file.
 - `/v1/chat` provider streaming is SSE only, not WebSocket.
-- Reconstructed streamed tool calls are not yet bridged into Agent tool-loop execution.
+- Streamed provider tool-call bridge waits for provider completion before executing tools.
 - Model-decided tool loop is synchronous.
 - Tool names must map to registered foundation skill ids.
 - Local provider is text-only and loads weights in-process.
@@ -308,7 +324,7 @@ GET /v1/agent/events?run_id=demo-run&stream=true
 
 ## Next steps
 
-- Bridge streamed provider tool calls into Agent tool loop execution.
+- Add live incremental tool execution while provider stream is still open.
 - Add workspace-level budget and quota checks.
 - Add distributed rate limiting backend.
 - Add resume/cancel/retry for Agent runs.
