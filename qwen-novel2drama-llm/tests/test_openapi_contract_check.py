@@ -51,6 +51,8 @@ class OpenApiContractCheckTests(unittest.TestCase):
                 "    ProviderToolCall:\n"
                 "    AgentRunRequest:\n"
                 "    AgentSkillCall:\n"
+                "    AgentLifecycleRequest:\n"
+                "    AgentLifecycleResponse:\n"
                 "    AgentEvent:\n"
                 "    AgentEventsResponse:\n"
                 "    execute_provider:\n"
