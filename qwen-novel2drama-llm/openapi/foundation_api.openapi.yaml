@@ -143,6 +143,35 @@ paths:
             application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}
             text/event-stream:
               schema: {type: string}
+  /v1/agent/status:
+    get:
+      summary: Read Agent run lifecycle status
+      operationId: getAgentStatus
+      parameters:
+        - {in: query, name: run_id, required: false, schema: {type: string, default: latest}}
+      responses:
+        '200': {description: Agent lifecycle status response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
+  /v1/agent/cancel:
+    post:
+      summary: Request cancellation for an Agent run
+      operationId: cancelAgentRun
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentLifecycleRequest'}}}}
+      responses:
+        '200': {description: Agent lifecycle cancel response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
+  /v1/agent/retry:
+    post:
+      summary: Retry an Agent run by replaying its saved request as a child run
+      operationId: retryAgentRun
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentLifecycleRequest'}}}}
+      responses:
+        '200': {description: Agent lifecycle retry response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
+  /v1/agent/resume:
+    post:
+      summary: Resume an Agent run by replaying its saved request as a child run
+      operationId: resumeAgentRun
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentLifecycleRequest'}}}}
+      responses:
+        '200': {description: Agent lifecycle resume response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
 components:
   securitySchemes:
     ApiKeyAuth:
@@ -361,6 +390,36 @@ components:
         approve_skills: {type: boolean, default: false}
         budget: {type: object, additionalProperties: true}
         privacy: {type: object, additionalProperties: true}
+      additionalProperties: true
+    AgentLifecycleRequest:
+      type: object
+      required: [run_id]
+      properties:
+        request_id: {type: string}
+        trace_id: {type: string}
+        workspace_id: {type: string}
+        run_id: {type: string}
+        new_run_id: {type: string}
+        reason: {type: string}
+        requested_by: {type: string}
+        owner_id: {type: string}
+        overrides: {type: object, additionalProperties: true}
+        allow_completed: {type: boolean, default: false}
+      additionalProperties: true
+    AgentLifecycleResponse:
+      type: object
+      properties:
+        action: {type: string}
+        run_id: {type: string}
+        source_run_id: {type: string}
+        new_run_id: {type: string}
+        status: {type: string}
+        source_status: {type: string}
+        previous_status: {type: string}
+        cancel_requested: {type: boolean}
+        artifacts: {type: object, additionalProperties: true}
+        event_summary: {type: object, additionalProperties: true}
+        run: {type: object, additionalProperties: true}
       additionalProperties: true
     AgentEvent:
       type: object
