@@ -9,11 +9,13 @@ Implemented files:
 - `agent/events.py`
 - `agent/tool_loop.py`
 - `agent/lifecycle.py`
+- `agent/run_store.py`
 - `inference/api_server.py`
 - `tests/test_agent_runtime.py`
 - `tests/test_agent_events.py`
 - `tests/test_agent_tool_loop.py`
 - `tests/test_agent_lifecycle.py`
+- `tests/test_run_store.py`
 - `tests/test_api_server_foundation.py`
 - `tests/test_provider_continuation.py`
 
@@ -84,21 +86,28 @@ The final run report includes:
 
 `GET /v1/agent/events` can read existing events as JSON or stream new events as Server-Sent Events.
 
-JSON mode:
+## Agent run store
 
-```text
-GET /v1/agent/events?run_id=demo
-```
+`agent/run_store.py` defines the replaceable run state boundary:
 
-SSE mode:
+- `RunStore`
+- `FileRunStore`
+- `file_run_store(output_root)`
 
-```text
-GET /v1/agent/events?run_id=demo&stream=true
-```
+Current lifecycle operations use `FileRunStore` for:
+
+- `agent_request.json`
+- `agent_run_report.json`
+- `events.jsonl`
+- `cancel_requested.json`
+
+`FileRunStore.status(run_id)` returns lifecycle status, artifacts, event summary, cancel marker state and run store metadata.
+
+This is the compatibility seam for future SQLite/Postgres run stores. The current runtime still writes artifacts directly to files; lifecycle reads/writes now go through the run store abstraction.
 
 ## Agent lifecycle controls
 
-`agent/lifecycle.py` provides file-backed lifecycle operations:
+`agent/lifecycle.py` provides lifecycle operations through the run store abstraction:
 
 - `status`
 - `cancel`
@@ -166,22 +175,7 @@ Enable it with:
 }
 ```
 
-For each model-decided tool call, the runtime:
-
-1. normalizes the tool call
-2. maps the tool name to a registered foundation skill
-3. checks tool-loop permissions
-4. executes the skill
-5. appends a `tool_result` content block to the next provider request
-6. calls the provider again
-7. repeats until no more tool calls or `max_tool_rounds` is reached
-
-The runtime writes:
-
-- `model_tool_loop.json`
-- `model_tool_loop_usage_aggregation.json`
-- `events.jsonl`
-- `agent_run_report.json`
+For each model-decided tool call, the runtime maps the tool name to a registered foundation skill, executes the skill, appends a `tool_result` content block, and calls the provider again until no more tool calls or `max_tool_rounds` is reached.
 
 ## Provider stream tool-call bridge
 
@@ -202,30 +196,11 @@ With this enabled, the runtime writes raw provider stream chunks to `provider_st
 
 `incremental_stream_tool_execution` can execute a streamed tool call before the provider stream has completed, once the partial tool call has both a tool name and JSON-decodable arguments.
 
-```json
-{
-  "execute_provider": true,
-  "enable_model_tool_loop": true,
-  "stream_provider_tool_calls": true,
-  "incremental_stream_tool_execution": true
-}
-```
-
 With this enabled, the runtime emits `provider_stream_tool_result`, writes `incremental_tool_results.json`, and reuses pre-executed results in the final model tool loop to avoid duplicate tool calls.
 
 ## Same-stream tool-result injection contract
 
 `same_stream_tool_result_injection` requests provider-supported bidirectional continuation.
-
-```json
-{
-  "execute_provider": true,
-  "enable_model_tool_loop": true,
-  "stream_provider_tool_calls": true,
-  "incremental_stream_tool_execution": true,
-  "same_stream_tool_result_injection": true
-}
-```
 
 Stream events added for this contract:
 
@@ -233,45 +208,14 @@ Stream events added for this contract:
 - `provider_stream_continuation_unsupported`
 - `provider_stream_continuation_failed`
 
-Current default behavior:
-
-1. execute the streamed tool call as soon as arguments are complete
-2. emit `provider_stream_tool_result`
-3. query provider continuation capability
-4. if unsupported, emit `provider_stream_continuation_unsupported`
-5. safely fall back to the existing next-provider-request tool loop
-
-This is a protocol and safety fallback layer. It does not mean OpenAI-compatible/local providers already support true same-stream bidirectional continuation.
-
-## Provider execution artifacts
-
-When provider execution runs, the runtime writes:
-
-- `agent_request.json`
-- `provider_response.json`
-- `usage_ledger.jsonl`
-- `events.jsonl`
-- `agent_run_report.json`
-
-When `stream_provider_tool_calls` is enabled, it also writes:
-
-- `provider_stream_chunks.jsonl`
-- `model_tool_loop_stream_round_<n>.jsonl` for streamed follow-up rounds
-
-When `incremental_stream_tool_execution` is enabled, it also writes:
-
-- `incremental_tool_results.json`
-- `model_tool_loop_incremental_round_<n>.json` for streamed follow-up rounds
-
-When same-stream continuation is requested, `provider_stream_chunks.jsonl` may also include:
-
-- `provider_stream_tool_result`
-- `provider_stream_continuation_unsupported`
-- `provider_stream_continuation_failed`
+Current default behavior executes the streamed tool call as soon as arguments are complete, emits `provider_stream_tool_result`, queries provider continuation capability, emits `provider_stream_continuation_unsupported` when unsupported, and safely falls back to next-provider-request tool loop.
 
 ## Current limitations
 
-- Agent lifecycle APIs are file-backed, not database-backed.
+- `FileRunStore` is the only implemented store.
+- Runtime artifact writes still use file paths directly; lifecycle reads/writes use the run store abstraction.
+- No SQLite/Postgres run store yet.
+- No transaction, lock, lease or distributed concurrency control yet.
 - Cancel is cooperative and checkpoint-based; it does not forcibly terminate an in-flight provider call.
 - Retry/resume are replay-based and create a child run; they do not continue from an arbitrary internal Python stack frame.
 - Same-stream tool-result injection is capability-gated; current providers default to unsupported.
@@ -279,4 +223,3 @@ When same-stream continuation is requested, `provider_stream_chunks.jsonl` may a
 - No provider-native bidirectional streaming adapter is implemented yet.
 - Tool execution is still synchronous.
 - Stream chunks are stored as JSONL files, not a distributed event log.
-- Lifecycle state is file-backed, not a distributed run database.
