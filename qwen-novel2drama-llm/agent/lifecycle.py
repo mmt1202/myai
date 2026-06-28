@@ -7,38 +7,32 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from agent.events import AgentEventWriter, read_agent_events, summarize_agent_events
-from agent.runtime import CANCEL_REQUEST_FILENAME, run_agent_once, save_json, now_iso
+from agent.events import AgentEventWriter
+from agent.run_store import FileRunStore, RunNotFoundError, file_run_store, marker_for_cancel
+from agent.runtime import run_agent_once, now_iso
 
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 RESTARTABLE_STATUSES = {"failed", "cancelled", "waiting_approval", "waiting_tool"}
 
 
 def safe_run_id(value: str) -> str:
-    run_id = str(value or "").strip()
-    if not run_id or "/" in run_id or "\\" in run_id or ".." in run_id:
-        raise ValueError(f"invalid run_id: {value}")
-    return run_id
+    return FileRunStore(Path(".")).safe_run_id(value)
 
 
 def run_dir(output_root: Path, run_id: str) -> Path:
-    return output_root / safe_run_id(run_id)
+    return file_run_store(output_root).run_dir(run_id)
 
 
 def load_json(path: Path, default: Any | None = None) -> Any:
-    if not path.exists():
-        if default is not None:
-            return deepcopy(default)
-        raise FileNotFoundError(str(path))
-    return json.loads(path.read_text(encoding="utf-8"))
+    return FileRunStore(path.parent).load_json(path, default)
 
 
 def run_report_path(output_root: Path, run_id: str) -> Path:
-    return run_dir(output_root, run_id) / "agent_run_report.json"
+    return file_run_store(output_root).artifact_path(run_id, "agent_run_report.json")
 
 
 def load_run_report(output_root: Path, run_id: str) -> dict[str, Any]:
-    return load_json(run_report_path(output_root, run_id))
+    return file_run_store(output_root).load_report(run_id)
 
 
 def original_request_from_report(report: dict[str, Any]) -> dict[str, Any]:
@@ -65,49 +59,36 @@ def original_request_from_report(report: dict[str, Any]) -> dict[str, Any]:
     return request
 
 
-def load_original_request(output_root: Path, run_id: str) -> dict[str, Any]:
-    directory = run_dir(output_root, run_id)
-    request_path = directory / "agent_request.json"
-    if request_path.exists():
-        return load_json(request_path)
-    return original_request_from_report(load_run_report(output_root, run_id))
+def load_original_request(output_root: Path, run_id: str, store: FileRunStore | None = None) -> dict[str, Any]:
+    active_store = store or file_run_store(output_root)
+    try:
+        return active_store.load_request(run_id)
+    except FileNotFoundError:
+        return original_request_from_report(active_store.load_report(run_id))
 
 
-def status_run(output_root: Path, run_id: str) -> dict[str, Any]:
-    report = load_run_report(output_root, run_id)
-    directory = run_dir(output_root, run_id)
-    events_path = directory / "events.jsonl"
-    events = read_agent_events(events_path)
-    return {
-        "run_id": safe_run_id(run_id),
-        "status": report.get("status"),
-        "error": report.get("error"),
-        "created_at": report.get("created_at"),
-        "updated_at": report.get("updated_at"),
-        "completed_at": report.get("completed_at"),
-        "cancel_requested": (directory / CANCEL_REQUEST_FILENAME).exists(),
-        "artifacts": report.get("artifacts") or {},
-        "event_summary": summarize_agent_events(events),
-    }
+def status_run(output_root: Path, run_id: str, store: FileRunStore | None = None) -> dict[str, Any]:
+    active_store = store or file_run_store(output_root)
+    return active_store.status(run_id)
 
 
-def write_lifecycle_event(output_root: Path, run_id: str, report: dict[str, Any], event_type: str, *, status: str, message: str | None = None, data: dict[str, Any] | None = None, error: str | None = None) -> None:
-    writer = AgentEventWriter(run_dir(output_root, run_id) / "events.jsonl", report, enabled=True)
+def write_lifecycle_event(output_root: Path, run_id: str, report: dict[str, Any], event_type: str, *, status: str, message: str | None = None, data: dict[str, Any] | None = None, error: str | None = None, store: FileRunStore | None = None) -> None:
+    active_store = store or file_run_store(output_root)
+    writer = AgentEventWriter(active_store.artifact_path(run_id, "events.jsonl"), report, enabled=True)
     writer.emit(event_type, status=status, message=message, data=data or {}, error=error)
 
 
-def cancel_run(output_root: Path, run_id: str, *, reason: str | None = None, requested_by: str | None = None) -> dict[str, Any]:
-    directory = run_dir(output_root, run_id)
+def cancel_run(output_root: Path, run_id: str, *, reason: str | None = None, requested_by: str | None = None, store: FileRunStore | None = None) -> dict[str, Any]:
+    active_store = store or file_run_store(output_root)
+    safe_id = active_store.safe_run_id(run_id)
+    directory = active_store.run_dir(safe_id)
     directory.mkdir(parents=True, exist_ok=True)
-    marker = {
-        "created_at": now_iso(),
-        "run_id": safe_run_id(run_id),
-        "reason": reason or "cancel_requested",
-        "requested_by": requested_by,
-    }
-    save_json(directory / CANCEL_REQUEST_FILENAME, marker)
-    report_path = directory / "agent_run_report.json"
-    report = load_json(report_path, {"run_id": safe_run_id(run_id), "status": "cancelled", "steps": [], "artifacts": {}})
+    marker = marker_for_cancel(safe_id, reason=reason, requested_by=requested_by)
+    active_store.save_cancel_request(safe_id, marker)
+    try:
+        report = active_store.load_report(safe_id)
+    except RunNotFoundError:
+        report = {"run_id": safe_id, "status": "cancelled", "steps": [], "artifacts": {}}
     previous_status = report.get("status")
     if previous_status not in TERMINAL_STATUSES or previous_status == "cancelled":
         report["status"] = "cancelled"
@@ -127,9 +108,9 @@ def cancel_run(output_root: Path, run_id: str, *, reason: str | None = None, req
                 "updated_at": marker["created_at"],
             }
         )
-        save_json(report_path, report)
-        write_lifecycle_event(output_root, run_id, report, "run_cancelled", status="cancelled", message=marker["reason"], data={"cancel": marker})
-    return {"run_id": safe_run_id(run_id), "previous_status": previous_status, "status": report.get("status"), "cancel": marker, "run": report}
+        active_store.save_report(safe_id, report)
+        write_lifecycle_event(output_root, safe_id, report, "run_cancelled", status="cancelled", message=marker["reason"], data={"cancel": marker}, store=active_store)
+    return {"run_id": safe_id, "previous_status": previous_status, "status": report.get("status"), "cancel": marker, "run": report, "run_store": active_store.metadata()}
 
 
 def next_child_run_id(source_run_id: str, action: str) -> str:
@@ -155,12 +136,15 @@ def retry_run(
     run_id: str,
     new_run_id: str | None = None,
     overrides: dict[str, Any] | None = None,
+    store: FileRunStore | None = None,
 ) -> dict[str, Any]:
-    original = load_original_request(output_root, run_id)
-    request = restart_request(run_id, original, action="retry", new_run_id=new_run_id, overrides=overrides)
-    child_dir = run_dir(output_root, request["run_id"])
+    active_store = store or file_run_store(output_root)
+    safe_id = active_store.safe_run_id(run_id)
+    original = load_original_request(output_root, safe_id, active_store)
+    request = restart_request(safe_id, original, action="retry", new_run_id=new_run_id, overrides=overrides)
+    child_dir = active_store.run_dir(request["run_id"])
     run = run_agent_once(project_root, request, child_dir)
-    return {"action": "retry", "source_run_id": safe_run_id(run_id), "new_run_id": request["run_id"], "run": run}
+    return {"action": "retry", "source_run_id": safe_id, "new_run_id": request["run_id"], "run": run, "run_store": active_store.metadata()}
 
 
 def resume_run(
@@ -171,15 +155,18 @@ def resume_run(
     new_run_id: str | None = None,
     overrides: dict[str, Any] | None = None,
     allow_completed: bool = False,
+    store: FileRunStore | None = None,
 ) -> dict[str, Any]:
-    report = load_run_report(output_root, run_id)
+    active_store = store or file_run_store(output_root)
+    safe_id = active_store.safe_run_id(run_id)
+    report = active_store.load_report(safe_id)
     if report.get("status") == "completed" and not allow_completed:
         raise ValueError("completed runs are not resumable without allow_completed=True")
-    original = load_original_request(output_root, run_id)
-    request = restart_request(run_id, original, action="resume", new_run_id=new_run_id, overrides=overrides)
-    child_dir = run_dir(output_root, request["run_id"])
+    original = load_original_request(output_root, safe_id, active_store)
+    request = restart_request(safe_id, original, action="resume", new_run_id=new_run_id, overrides=overrides)
+    child_dir = active_store.run_dir(request["run_id"])
     run = run_agent_once(project_root, request, child_dir)
-    return {"action": "resume", "source_run_id": safe_run_id(run_id), "new_run_id": request["run_id"], "source_status": report.get("status"), "run": run}
+    return {"action": "resume", "source_run_id": safe_id, "new_run_id": request["run_id"], "source_status": report.get("status"), "run": run, "run_store": active_store.metadata()}
 
 
 def parse_json_arg(value: str | None) -> dict[str, Any]:
@@ -189,9 +176,10 @@ def parse_json_arg(value: str | None) -> dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Manage file-backed Agent run lifecycle: status, cancel, retry and resume.")
+    parser = argparse.ArgumentParser(description="Manage Agent run lifecycle through the configured run store: status, cancel, retry and resume.")
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--output-root", default="outputs/agent_runtime/api")
+    parser.add_argument("--run-store", choices=["file"], default="file")
     sub = parser.add_subparsers(dest="command", required=True)
 
     status_parser = sub.add_parser("status")
@@ -216,14 +204,15 @@ def main() -> int:
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
     output_root = Path(args.output_root)
+    store = file_run_store(output_root)
     if args.command == "status":
-        result = status_run(output_root, args.run_id)
+        result = status_run(output_root, args.run_id, store)
     elif args.command == "cancel":
-        result = cancel_run(output_root, args.run_id, reason=args.reason, requested_by=args.requested_by)
+        result = cancel_run(output_root, args.run_id, reason=args.reason, requested_by=args.requested_by, store=store)
     elif args.command == "retry":
-        result = retry_run(project_root=project_root, output_root=output_root, run_id=args.run_id, new_run_id=args.new_run_id, overrides=parse_json_arg(args.overrides))
+        result = retry_run(project_root=project_root, output_root=output_root, run_id=args.run_id, new_run_id=args.new_run_id, overrides=parse_json_arg(args.overrides), store=store)
     elif args.command == "resume":
-        result = resume_run(project_root=project_root, output_root=output_root, run_id=args.run_id, new_run_id=args.new_run_id, overrides=parse_json_arg(args.overrides), allow_completed=bool(args.allow_completed))
+        result = resume_run(project_root=project_root, output_root=output_root, run_id=args.run_id, new_run_id=args.new_run_id, overrides=parse_json_arg(args.overrides), allow_completed=bool(args.allow_completed), store=store)
     else:
         raise ValueError(f"unsupported command: {args.command}")
     print(json.dumps(result, ensure_ascii=False, indent=2))
