@@ -10,6 +10,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "agent"))
 
 from agent.runtime import add_step, approval_required, create_run, run_agent_once, transition
+from agent.sqlite_run_store import sqlite_run_store
 
 
 class AgentRuntimeTests(unittest.TestCase):
@@ -55,6 +56,43 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertEqual(run["status"], "completed")
             self.assertEqual(run["route_decision"]["selected_model_id"], "local.qwen2_5_1_5b_instruct")
             self.assertTrue((Path(tmpdir) / "usage_ledger.jsonl").exists())
+
+    def test_run_agent_once_indexes_request_report_and_artifacts_in_sqlite_store(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+            output_root = Path(tmpdir)
+            store = sqlite_run_store(output_root / "runs.sqlite")
+            request = {
+                "run_id": "runtime_sqlite",
+                "task": "hello sqlite runtime",
+                "route_mode": "balanced",
+                "privacy": {"local_only": True},
+                "approval_policy": "never",
+            }
+            run = run_agent_once(PROJECT_ROOT, request, store.run_dir("runtime_sqlite"), store=store)
+            self.assertEqual(run["status"], "completed")
+            self.assertEqual(store.load_request("runtime_sqlite")["task"], "hello sqlite runtime")
+            self.assertEqual(store.load_report("runtime_sqlite")["status"], "completed")
+            status = store.status("runtime_sqlite")
+            self.assertEqual(status["status"], "completed")
+            self.assertEqual(status["run_store"]["type"], "sqlite")
+            self.assertIn("report", status["artifacts"])
+            self.assertIn("request", status["artifacts"])
+            self.assertIn("events", status["artifacts"])
+
+    def test_run_agent_once_honors_sqlite_cancel_marker(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+            output_root = Path(tmpdir)
+            store = sqlite_run_store(output_root / "runs.sqlite")
+            store.save_cancel_request("cancel_sqlite", {"run_id": "cancel_sqlite", "reason": "stop"})
+            run = run_agent_once(
+                PROJECT_ROOT,
+                {"run_id": "cancel_sqlite", "task": "hello", "route_mode": "balanced", "privacy": {"local_only": True}, "approval_policy": "never"},
+                store.run_dir("cancel_sqlite"),
+                store=store,
+            )
+            self.assertEqual(run["status"], "cancelled")
+            self.assertEqual(run["error"], "cancelled")
+            self.assertTrue(store.cancel_requested("cancel_sqlite"))
 
     def test_run_agent_once_waits_for_review(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
