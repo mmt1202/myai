@@ -40,12 +40,20 @@ def cost_amount(cost: dict[str, Any] | None) -> float:
 
 def provider_response_model_id(provider_response: dict[str, Any], default_model_id: str | None = None) -> str | None:
     model = provider_response.get("model") or {}
-    return model.get("model_id") or provider_response.get("model_id") or provider_response.get("model") or default_model_id
+    if isinstance(model, dict) and model.get("model_id"):
+        return str(model.get("model_id"))
+    if provider_response.get("model_id"):
+        return str(provider_response.get("model_id"))
+    if isinstance(model, str):
+        return model
+    return default_model_id
 
 
 def provider_response_provider(provider_response: dict[str, Any], model_instance: dict[str, Any] | None = None) -> str | None:
     model = provider_response.get("model") or {}
-    return model.get("provider") or (model_instance or {}).get("provider")
+    if isinstance(model, dict) and model.get("provider"):
+        return str(model.get("provider"))
+    return (model_instance or {}).get("provider")
 
 
 def cost_for_provider_call(provider_response: dict[str, Any], usage: dict[str, Any], model_instance: dict[str, Any], currency: str) -> dict[str, Any]:
@@ -98,7 +106,7 @@ def provider_call_record(
     }
 
 
-def collect_provider_calls(initial_provider_response: dict[str, Any], model_tool_loop_summary: dict[str, Any], *, default_model_id: str | None = None, instances_registry: dict[str, Any]) -> list[dict[str, Any]]:
+def collect_provider_calls(initial_provider_response: dict[str, Any], model_tool_loop_summary: dict[str, Any], *, instances_registry: dict[str, Any], default_model_id: str | None = None) -> list[dict[str, Any]]:
     calls = [
         provider_call_record(
             source="initial_provider_response",
@@ -173,8 +181,8 @@ def aggregate_model_tool_loop_usage(
     calls = collect_provider_calls(
         initial_provider_response,
         model_tool_loop_summary,
-        default_model_id=selected_model_id,
         instances_registry=instances_registry,
+        default_model_id=selected_model_id,
     )
     aggregate = aggregate_provider_calls(calls, currency=instances_registry.get("default_currency", "USD"))
     return {
