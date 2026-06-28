@@ -116,6 +116,61 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertTrue(run["provider_response"]["output"]["dry_run"])
             self.assertIn("usage_reconciliation", run["provider_response"])
 
+    def test_run_agent_workspace_quota_allows_and_records_usage(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+            config_path = Path(tmpdir) / "workspace_quotas.json"
+            state_path = Path(tmpdir) / "workspace_quota_state.json"
+            config_path.write_text('{"default":{"enabled":true,"daily":{"max_requests":10,"max_total_tokens":100000,"max_cost":10}}}', encoding="utf-8")
+            run = run_agent_once(
+                project_root=PROJECT_ROOT,
+                request={
+                    "task": "quota provider dry run",
+                    "route_mode": "smart",
+                    "workspace_id": "w1",
+                    "approval_policy": "never",
+                    "execute_provider": True,
+                    "dry_run_provider": True,
+                    "workspace_quota_enabled": True,
+                    "workspace_quota_config_path": str(config_path),
+                    "workspace_quota_state_path": str(state_path),
+                    "base_url": "http://example.test/v1",
+                },
+                output_dir=Path(tmpdir),
+            )
+            self.assertEqual(run["status"], "completed")
+            self.assertTrue((Path(tmpdir) / "workspace_quota_check.json").exists())
+            self.assertTrue((Path(tmpdir) / "workspace_quota_usage.json").exists())
+            self.assertTrue(state_path.exists())
+            self.assertEqual(run["workspace_quota_check"]["decision"], "allowed")
+            self.assertIn("workspace_quota_check", run["artifacts"])
+            self.assertIn("workspace_quota_usage", run["artifacts"])
+
+    def test_run_agent_workspace_quota_denies_provider_execution(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+            config_path = Path(tmpdir) / "workspace_quotas.json"
+            state_path = Path(tmpdir) / "workspace_quota_state.json"
+            config_path.write_text('{"default":{"enabled":true,"daily":{"max_requests":0.5}}}', encoding="utf-8")
+            run = run_agent_once(
+                project_root=PROJECT_ROOT,
+                request={
+                    "task": "quota denied dry run",
+                    "route_mode": "smart",
+                    "workspace_id": "w1",
+                    "approval_policy": "never",
+                    "execute_provider": True,
+                    "dry_run_provider": True,
+                    "workspace_quota_enabled": True,
+                    "workspace_quota_config_path": str(config_path),
+                    "workspace_quota_state_path": str(state_path),
+                    "base_url": "http://example.test/v1",
+                },
+                output_dir=Path(tmpdir),
+            )
+            self.assertEqual(run["status"], "failed")
+            self.assertEqual(run["error"], "workspace_quota_exceeded")
+            self.assertTrue((Path(tmpdir) / "workspace_quota_check.json").exists())
+            self.assertFalse((Path(tmpdir) / "provider_response.json").exists())
+
     def test_run_agent_executes_stream_provider_tool_bridge_dry_run(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
             run = run_agent_once(
