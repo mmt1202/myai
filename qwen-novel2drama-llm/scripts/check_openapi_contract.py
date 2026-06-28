@@ -45,6 +45,7 @@ REQUIRED_OPENAPI_TOKENS = {
     "execute_provider:",
     "dry_run_provider:",
     "stream:",
+    "stream_provider_tool_calls:",
     "stream_include_usage:",
     "stream_options:",
     "stream_chunk_chars:",
