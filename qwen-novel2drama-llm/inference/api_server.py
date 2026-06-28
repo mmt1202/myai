@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib
 import json
 import sys
 import time
@@ -18,7 +19,6 @@ for path in [PROJECT_ROOT, INFERENCE_DIR]:
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from model_utils import generate_text, load_model, load_system_prompt
 from model_version_registry import resolve_model_paths
 from pydantic import BaseModel, Field
 
@@ -59,6 +59,22 @@ class GenerateRequest(BaseModel):
 class GenerateResponse(BaseModel):
     result: str
     model_version: str | None = None
+
+
+def model_utils_module() -> Any:
+    return importlib.import_module("model_utils")
+
+
+def generate_text_runtime(tokenizer: Any, model: Any, prompt: str, max_new_tokens: int, temperature: float, system_prompt: str) -> str:
+    return model_utils_module().generate_text(tokenizer, model, prompt, max_new_tokens, temperature, system_prompt)
+
+
+def load_model_runtime(model_path: str, adapter_path: str | None = None) -> tuple[Any, Any, Any]:
+    return model_utils_module().load_model(model_path, adapter_path)
+
+
+def load_system_prompt_runtime(system_prompt_file: str | None = None) -> str:
+    return model_utils_module().load_system_prompt(system_prompt_file)
 
 
 def request_id(body: dict[str, Any]) -> str | None:
@@ -293,7 +309,7 @@ def generate_api(request: GenerateRequest) -> GenerateResponse:
     if TOKENIZER is None or MODEL is None:
         raise HTTPException(status_code=503, detail="model is not loaded")
     try:
-        result = generate_text(TOKENIZER, MODEL, request.prompt, request.max_new_tokens, request.temperature, SYSTEM_PROMPT)
+        result = generate_text_runtime(TOKENIZER, MODEL, request.prompt, request.max_new_tokens, request.temperature, SYSTEM_PROMPT)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"generation failed: {exc}") from exc
     return GenerateResponse(result=result, model_version=ACTIVE_MODEL_VERSION)
@@ -539,8 +555,8 @@ def main() -> int:
     if not args.skip_model_load:
         try:
             model_path, adapter_path, version = resolve_startup_model(args)
-            SYSTEM_PROMPT = load_system_prompt(args.system_prompt_file)
-            TOKENIZER, MODEL, _ = load_model(model_path, adapter_path)
+            SYSTEM_PROMPT = load_system_prompt_runtime(args.system_prompt_file)
+            TOKENIZER, MODEL, _ = load_model_runtime(model_path, adapter_path)
             ACTIVE_MODEL_VERSION = version
             ACTIVE_MODEL_PATH = model_path
         except Exception as exc:  # noqa: BLE001
