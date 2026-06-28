@@ -26,6 +26,10 @@ REQUIRED_RUNTIME_ENDPOINTS = {
     "/v1/mcp/call",
     "/v1/agent/run",
     "/v1/agent/events",
+    "/v1/agent/status",
+    "/v1/agent/cancel",
+    "/v1/agent/retry",
+    "/v1/agent/resume",
 }
 
 REQUIRED_OPENAPI_TOKENS = {
@@ -40,6 +44,8 @@ REQUIRED_OPENAPI_TOKENS = {
     "ProviderToolCall:",
     "AgentRunRequest:",
     "AgentSkillCall:",
+    "AgentLifecycleRequest:",
+    "AgentLifecycleResponse:",
     "AgentEvent:",
     "AgentEventsResponse:",
     "execute_provider:",
