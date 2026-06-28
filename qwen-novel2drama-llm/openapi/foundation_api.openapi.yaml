@@ -332,6 +332,7 @@ components:
         dry_run_provider: {type: boolean, default: false}
         enable_model_tool_loop: {type: boolean, default: false}
         stream_provider_tool_calls: {type: boolean, default: false}
+        incremental_stream_tool_execution: {type: boolean, default: false}
         max_tool_rounds: {type: integer, default: 3}
         allow_model_tool_provider: {type: boolean, default: false}
         allow_model_tool_write: {type: boolean, default: false}
