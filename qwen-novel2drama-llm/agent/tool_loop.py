@@ -12,7 +12,7 @@ def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def save_json(path: Path, data: dict[str, Any]) -> None:
+def save_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -68,7 +68,7 @@ def normalize_tool_call(item: dict[str, Any]) -> dict[str, Any]:
     if arguments is None:
         arguments = function.get("arguments")
     return {
-        "id": str(item.get("id") or item.get("tool_call_id") or name),
+        "id": str(item.get("id") or item.get("tool_call_id") or item.get("index") or name),
         "name": str(name),
         "arguments": parse_arguments(arguments),
         "raw": item,
@@ -145,6 +145,72 @@ def provider_response_from_stream_chunks(chunks: list[dict[str, Any]]) -> dict[s
     }
 
 
+def complete_partial_tool_call(chunk: dict[str, Any]) -> dict[str, Any] | None:
+    if chunk.get("event_type") != "provider_stream_tool_call_delta":
+        return None
+    metadata = chunk.get("metadata") or {}
+    partial = metadata.get("tool_call_partial") or {}
+    if not isinstance(partial, dict):
+        return None
+    function = partial.get("function") or {}
+    name = partial.get("name") or function.get("name") or partial.get("skill_id")
+    if not name:
+        return None
+    arguments = partial.get("arguments_json")
+    if arguments is None:
+        arguments = partial.get("arguments")
+    if arguments is None:
+        arguments = function.get("arguments")
+    if isinstance(arguments, str) and not arguments.strip():
+        return None
+    try:
+        return normalize_tool_call({**partial, "name": name, "arguments": arguments})
+    except Exception:
+        return None
+
+
+def incremental_result_map(provider_response: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    results = provider_response.get("incremental_tool_results") or []
+    if not isinstance(results, list):
+        return {}
+    mapped: dict[str, dict[str, Any]] = {}
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        tool_call = item.get("tool_call") or {}
+        result = item.get("result") or {}
+        tool_call_id = tool_call.get("id") or result.get("tool_call_id")
+        if tool_call_id:
+            mapped[str(tool_call_id)] = result
+    return mapped
+
+
+def maybe_execute_incremental_tool_call(
+    chunk: dict[str, Any],
+    registry: dict[str, Any],
+    executed_tool_call_ids: set[str],
+    *,
+    allow_provider: bool = False,
+    allow_write: bool = False,
+    approved: bool = False,
+) -> dict[str, Any] | None:
+    tool_call = complete_partial_tool_call(chunk)
+    if not tool_call:
+        return None
+    tool_call_id = str(tool_call.get("id") or tool_call.get("name"))
+    if tool_call_id in executed_tool_call_ids:
+        return None
+    executed_tool_call_ids.add(tool_call_id)
+    result = execute_tool_call(registry, tool_call, allow_provider=allow_provider, allow_write=allow_write, approved=approved)
+    return {
+        "tool_call": tool_call,
+        "result": result,
+        "source_event_type": chunk.get("event_type"),
+        "source_chunk_id": chunk.get("chunk_id"),
+        "executed_while_streaming": True,
+    }
+
+
 def generate_provider_round(
     request: dict[str, Any],
     instances: dict[str, Any],
@@ -154,6 +220,12 @@ def generate_provider_round(
     api_key_env: str = "MODEL_API_KEY",
     stream: bool = False,
     stream_chunks_path: Path | None = None,
+    incremental_tools: bool = False,
+    registry: dict[str, Any] | None = None,
+    incremental_tool_results_path: Path | None = None,
+    allow_provider: bool = False,
+    allow_write: bool = False,
+    approved: bool = False,
 ) -> dict[str, Any]:
     if not stream:
         return generate_with_registry(
@@ -164,19 +236,41 @@ def generate_provider_round(
             api_key_env=api_key_env,
         )
     stream_request = {**request, "stream": True}
-    chunks = list(
-        stream_generate_with_registry(
-            stream_request,
-            instances,
-            model_id=selected_model_id,
-            base_url=base_url,
-            api_key_env=api_key_env,
-        )
-    )
+    chunks: list[dict[str, Any]] = []
+    incremental_results: list[dict[str, Any]] = []
+    executed_tool_call_ids: set[str] = set()
+    for chunk in stream_generate_with_registry(
+        stream_request,
+        instances,
+        model_id=selected_model_id,
+        base_url=base_url,
+        api_key_env=api_key_env,
+    ):
+        chunks.append(chunk)
+        if incremental_tools and registry is not None:
+            result = maybe_execute_incremental_tool_call(
+                chunk,
+                registry,
+                executed_tool_call_ids,
+                allow_provider=allow_provider,
+                allow_write=allow_write,
+                approved=approved,
+            )
+            if result:
+                incremental_results.append(result)
     if stream_chunks_path:
         save_jsonl(stream_chunks_path, chunks)
+    if incremental_tool_results_path:
+        save_json(incremental_tool_results_path, {"results": incremental_results})
     response = provider_response_from_stream_chunks(chunks)
     response["stream_chunks_path"] = str(stream_chunks_path) if stream_chunks_path else None
+    if incremental_results:
+        response["incremental_tool_results"] = incremental_results
+        response["incremental_tool_results_path"] = str(incremental_tool_results_path) if incremental_tool_results_path else None
+        response.setdefault("stream", {})["incremental_tool_result_count"] = len(incremental_results)
+    elif incremental_tool_results_path:
+        response["incremental_tool_results_path"] = str(incremental_tool_results_path)
+        response.setdefault("stream", {})["incremental_tool_result_count"] = 0
     return response
 
 
@@ -197,6 +291,7 @@ def run_model_tool_loop(
     approved = bool(request.get("approve_model_tools"))
     fail_on_tool_error = bool(request.get("fail_on_model_tool_error", True))
     use_stream = bool(request.get("stream_provider_tool_calls"))
+    incremental_stream = bool(request.get("incremental_stream_tool_execution"))
     current_response = initial_provider_response
     current_request = {**foundation_request, "model_id": selected_model_id, "model": selected_model_id}
     rounds: list[dict[str, Any]] = []
@@ -204,18 +299,23 @@ def run_model_tool_loop(
         tool_calls = extract_tool_calls(current_response)
         if not tool_calls:
             break
+        preexecuted_results = incremental_result_map(current_response)
         round_results: list[dict[str, Any]] = []
         for tool_call in tool_calls:
-            result = execute_tool_call(
-                registry,
-                tool_call,
-                allow_provider=allow_provider,
-                allow_write=allow_write,
-                approved=approved,
-            )
+            result = preexecuted_results.get(str(tool_call.get("id")))
+            if result:
+                result = {**result, "source": "incremental_stream"}
+            else:
+                result = execute_tool_call(
+                    registry,
+                    tool_call,
+                    allow_provider=allow_provider,
+                    allow_write=allow_write,
+                    approved=approved,
+                )
             round_results.append({"tool_call": tool_call, "result": result})
             if result.get("status") != "ok" and fail_on_tool_error:
-                summary = {"rounds": rounds + [{"round": round_index + 1, "tool_results": round_results}], "status": "failed", "error": result.get("error"), "stream_provider_tool_calls": use_stream}
+                summary = {"rounds": rounds + [{"round": round_index + 1, "tool_results": round_results}], "status": "failed", "error": result.get("error"), "stream_provider_tool_calls": use_stream, "incremental_stream_tool_execution": incremental_stream}
                 save_json(output_dir / "model_tool_loop.json", summary)
                 return summary
         next_request = build_next_provider_request(current_request, selected_model_id, round_results)
@@ -230,6 +330,12 @@ def run_model_tool_loop(
             api_key_env=request.get("api_key_env") or "MODEL_API_KEY",
             stream=use_stream,
             stream_chunks_path=output_dir / f"model_tool_loop_stream_round_{round_index + 1}.jsonl" if use_stream else None,
+            incremental_tools=incremental_stream,
+            registry=registry,
+            incremental_tool_results_path=output_dir / f"model_tool_loop_incremental_round_{round_index + 1}.json" if use_stream and incremental_stream else None,
+            allow_provider=allow_provider,
+            allow_write=allow_write,
+            approved=approved,
         )
         rounds.append(
             {
@@ -241,6 +347,6 @@ def run_model_tool_loop(
         )
         current_request = next_request
         current_response = next_response
-    summary = {"status": "ok", "round_count": len(rounds), "rounds": rounds, "final_provider_response": current_response, "stream_provider_tool_calls": use_stream}
+    summary = {"status": "ok", "round_count": len(rounds), "rounds": rounds, "final_provider_response": current_response, "stream_provider_tool_calls": use_stream, "incremental_stream_tool_execution": incremental_stream}
     save_json(output_dir / "model_tool_loop.json", summary)
     return summary
