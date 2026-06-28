@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -21,6 +22,7 @@ class FoundationApiServerTests(unittest.TestCase):
         self.assertIn("router", result["capabilities"])
         self.assertIn("agent_events", result["capabilities"])
         self.assertIn("agent_lifecycle", result["capabilities"])
+        self.assertIn("agent_run_store", result["capabilities"])
         self.assertIn("provider_stream", result["capabilities"])
 
     def test_token_count_api(self) -> None:
@@ -122,6 +124,39 @@ class FoundationApiServerTests(unittest.TestCase):
                 self.assertEqual(resume_result["output"]["run"]["resume_of"], "demo")
             finally:
                 api_server.AGENT_OUTPUT_DIR = original
+
+    def test_agent_lifecycle_api_uses_sqlite_run_store_from_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_dir = api_server.AGENT_OUTPUT_DIR
+            old_store = os.environ.get("FOUNDATION_AGENT_RUN_STORE")
+            old_db = os.environ.get("FOUNDATION_AGENT_RUN_DB")
+            api_server.AGENT_OUTPUT_DIR = Path(tmpdir) / "api"
+            os.environ["FOUNDATION_AGENT_RUN_STORE"] = "sqlite"
+            os.environ["FOUNDATION_AGENT_RUN_DB"] = str(Path(tmpdir) / "runs.sqlite")
+            try:
+                store = api_server.agent_run_store()
+                self.assertEqual(store.metadata()["type"], "sqlite")
+
+                run_result = api_server.agent_run_api({"run_id": "sqlite_demo", "task": "hello", "route_mode": "balanced", "privacy": {"local_only": True}, "approval_policy": "never"})
+                self.assertEqual(run_result["status"], "ok")
+                status_result = api_server.agent_status_api(run_id="sqlite_demo")
+                self.assertEqual(status_result["status"], "ok")
+                self.assertEqual(status_result["output"]["run_store"]["type"], "sqlite")
+                self.assertEqual(status_result["output"]["status"], "completed")
+
+                retry_result = api_server.agent_retry_api({"run_id": "sqlite_demo", "new_run_id": "sqlite_retry", "overrides": {"task": "retry sqlite"}})
+                self.assertEqual(retry_result["status"], "ok")
+                self.assertEqual(api_server.agent_status_api(run_id="sqlite_retry")["output"]["status"], "completed")
+            finally:
+                api_server.AGENT_OUTPUT_DIR = original_dir
+                if old_store is None:
+                    os.environ.pop("FOUNDATION_AGENT_RUN_STORE", None)
+                else:
+                    os.environ["FOUNDATION_AGENT_RUN_STORE"] = old_store
+                if old_db is None:
+                    os.environ.pop("FOUNDATION_AGENT_RUN_DB", None)
+                else:
+                    os.environ["FOUNDATION_AGENT_RUN_DB"] = old_db
 
     def test_agent_lifecycle_missing_run_returns_failed_envelope(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
