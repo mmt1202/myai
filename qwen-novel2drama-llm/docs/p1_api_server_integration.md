@@ -5,6 +5,7 @@ The FastAPI server exposes foundation services through `/v1/*` routes while pres
 Implemented files:
 
 - `inference/api_server.py`
+- `agent/run_store.py`
 - `tests/test_api_server_foundation.py`
 
 ## Start server
@@ -44,12 +45,6 @@ X-Workspace-Id: your_workspace_id
 
 `/health`, `/v1/health`, `/docs` and `/openapi.json` remain public.
 
-Auth audit events are written to:
-
-```text
-outputs/auth/auth_audit.jsonl
-```
-
 ## Foundation endpoints
 
 Runtime endpoints:
@@ -83,16 +78,6 @@ The legacy `POST /generate` endpoint remains and still requires a loaded local m
 
 By default, provider execution is skipped and the API returns route, usage and cost estimates.
 
-To call a provider adapter:
-
-```json
-{
-  "execute_provider": true,
-  "base_url": "https://provider.example/v1",
-  "api_key_env": "MODEL_API_KEY"
-}
-```
-
 To stream provider output as SSE:
 
 ```json
@@ -108,19 +93,6 @@ To stream provider output as SSE:
 
 For OpenAI-compatible providers, the adapter sends native `stream=true` to `/chat/completions`, parses provider SSE `data: {...}` lines, stops on `data: [DONE]`, and converts text/tool-call deltas into foundation `ProviderStreamEvent` chunks.
 
-Provider stream event types include:
-
-- `provider_stream_started`
-- `provider_stream_delta`
-- `provider_stream_tool_call_delta`
-- `provider_stream_tool_result`
-- `provider_stream_continuation_unsupported`
-- `provider_stream_continuation_failed`
-- `provider_stream_completed`
-- `provider_stream_failed`
-
-`/v1/chat` does not execute reconstructed tool calls. Agent execution can bridge them when `stream_provider_tool_calls` is enabled.
-
 ## Agent provider execution, tool loops and live events
 
 `/v1/agent/run` supports provider execution, request-defined skill calls, model-decided tool calls, stream tool-call bridging, incremental stream tool execution, workspace quota and run events through `agent/runtime.py`.
@@ -135,36 +107,6 @@ Provider preflight only:
   "approval_policy": "never"
 }
 ```
-
-Streamed provider tool-call bridge:
-
-```json
-{
-  "task": "use tools if needed",
-  "route_mode": "smart",
-  "approval_policy": "never",
-  "execute_provider": true,
-  "enable_model_tool_loop": true,
-  "stream_provider_tool_calls": true,
-  "stream_include_usage": true
-}
-```
-
-Incremental stream tool execution:
-
-```json
-{
-  "task": "use tools as soon as arguments are complete",
-  "route_mode": "smart",
-  "approval_policy": "never",
-  "execute_provider": true,
-  "enable_model_tool_loop": true,
-  "stream_provider_tool_calls": true,
-  "incremental_stream_tool_execution": true
-}
-```
-
-When enabled, Agent executes a streamed tool call as soon as the partial has both a tool name and JSON-decodable arguments. It writes `incremental_tool_results.json` and reuses those results in the final model tool loop to avoid duplicate execution.
 
 Agent events are written to:
 
@@ -184,9 +126,23 @@ Stream events as SSE:
 GET /v1/agent/events?run_id=demo-run&stream=true
 ```
 
-## Agent lifecycle APIs
+## Agent lifecycle APIs and run store
 
-The API server exposes file-backed lifecycle controls from `agent/lifecycle.py`.
+The API server exposes lifecycle controls from `agent/lifecycle.py`.
+
+Lifecycle functions now use the `agent/run_store.py` boundary:
+
+```text
+RunStore
+FileRunStore
+file_run_store(output_root)
+```
+
+The current API server uses `FileRunStore` under:
+
+```text
+outputs/agent_runtime/api/<run_id>/
+```
 
 Status:
 
@@ -236,15 +192,18 @@ All lifecycle endpoints use `agent:run` auth scope.
 
 Current lifecycle behavior:
 
-- `status` reads `agent_run_report.json` and `events.jsonl`.
-- `cancel` writes `cancel_requested.json` and updates non-terminal reports to `cancelled`.
+- `status` reads `agent_run_report.json` and `events.jsonl` through `FileRunStore`.
+- `cancel` writes `cancel_requested.json` through `FileRunStore` and updates non-terminal reports to `cancelled`.
 - `retry` loads `agent_request.json`, merges overrides, and creates a child run with `retry_of`.
 - `resume` loads `agent_request.json`, merges overrides, and creates a child run with `resume_of`.
 
 ## Current limitations
 
 - Agent SSE currently polls the JSONL event file.
-- Lifecycle APIs are file-backed and do not use a database run store.
+- `FileRunStore` is the only implemented run store.
+- Runtime writes still use file paths directly; lifecycle reads/writes use the store boundary.
+- No SQLite/Postgres run store yet.
+- No transaction, lock, lease or distributed concurrency control yet.
 - Cancel is cooperative and does not forcibly terminate an in-flight provider call.
 - Retry/resume are replay-based child runs, not arbitrary stack-frame continuation.
 - `/v1/chat` provider streaming is SSE only, not WebSocket.
@@ -256,7 +215,8 @@ Current lifecycle behavior:
 
 ## Next steps
 
-- Add database run store for Agent lifecycle.
+- Add SQLite/Postgres run store implementation.
+- Migrate runtime artifact writes to the run store interface.
 - Add distributed quota/rate limit backend.
 - Add provider-native bidirectional continuation adapter.
 - Add secret-gated real provider smoke tests.
