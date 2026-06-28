@@ -1,0 +1,2 @@
+# Dependency-free core profile.
+# The core CI profile intentionally uses only the Python standard library.
