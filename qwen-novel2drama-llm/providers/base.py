@@ -129,6 +129,24 @@ def provider_stream_event(
     }
 
 
+def continuation_capability(model_instance: dict[str, Any] | None) -> dict[str, Any]:
+    instance = model_instance or {}
+    runtime_config = instance.get("runtime_config") or {}
+    continuation = runtime_config.get("bidirectional_tool_continuation") or runtime_config.get("same_stream_tool_result_injection") or {}
+    if isinstance(continuation, bool):
+        continuation = {"supported": continuation}
+    if not isinstance(continuation, dict):
+        continuation = {}
+    supported = bool(continuation.get("supported"))
+    protocol = continuation.get("protocol") or "unsupported"
+    return {
+        "supported": supported,
+        "protocol": protocol if supported else "unsupported",
+        "mode": continuation.get("mode") or ("provider_native" if supported else "fallback_next_provider_request"),
+        "notes": continuation.get("notes") or "Provider adapter does not support same-stream tool-result injection.",
+    }
+
+
 def text_from_provider_response(response: dict[str, Any]) -> str:
     output = response.get("output") or {}
     content = output.get("content") or [] if isinstance(output, dict) else []
@@ -180,6 +198,12 @@ class BaseProvider(ABC):
             return False
         return True
 
+    def continuation_capability(self) -> dict[str, Any]:
+        return continuation_capability(self.model_instance)
+
+    def supports_bidirectional_tool_continuation(self) -> bool:
+        return bool(self.continuation_capability().get("supported"))
+
     @abstractmethod
     def generate(self, request: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
@@ -203,4 +227,13 @@ class BaseProvider(ABC):
             usage=response.get("usage") or {},
             done=True,
             metadata={"fallback_full_response": True},
+        )
+
+    def continue_stream_with_tool_result(self, request: dict[str, Any], tool_call: dict[str, Any], tool_result: dict[str, Any], stream_context: dict[str, Any] | None = None) -> Iterator[dict[str, Any]]:
+        capability = self.continuation_capability()
+        raise ProviderError(
+            "bidirectional_tool_continuation_unsupported",
+            "provider does not support same-stream tool-result injection",
+            retryable=False,
+            details={"capability": capability, "tool_call_id": tool_call.get("id") or tool_result.get("tool_call_id")},
         )
