@@ -212,6 +212,7 @@ Stream fields:
 - `force_chunked_stream`
 - `stream_include_usage`
 - `stream_options`
+- `stream_provider_tool_calls`
 
 `/v1/chat` returns `text/event-stream` when `stream=true` and `execute_provider=true`.
 
@@ -231,7 +232,9 @@ Streamed tool calls are reconstructed by `index` and returned under:
 provider_stream_completed.output.tool_calls
 ```
 
-The provider adapter reconstructs tool calls but does not execute them.
+`stream_provider_tool_calls` makes Agent provider execution collect stream chunks, convert the completed stream into a provider response, and pass reconstructed tool calls into the existing model tool loop.
+
+The stream bridge is synchronous and waits for provider completion before executing tools.
 
 The default is route/cost preflight only.
 
@@ -257,6 +260,7 @@ Request-level skill defaults:
 Model-decided tool loop fields:
 
 - `enable_model_tool_loop`
+- `stream_provider_tool_calls`
 - `max_tool_rounds`
 - `allow_model_tool_provider`
 - `allow_model_tool_write`
@@ -287,9 +291,9 @@ Applications can use these capabilities later through the same routing and API l
 
 ## Next implementation step
 
-After streamed tool-call delta reconstruction v1, continue with:
+After provider stream tool-call bridge v1, continue with:
 
-1. bridge streamed provider tool calls into Agent tool-loop execution
+1. live incremental tool execution while provider stream is still open
 2. provider usage reconciliation
 3. workspace-level budget and quota checks
 4. CI contract check
