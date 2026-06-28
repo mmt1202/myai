@@ -7,6 +7,8 @@ Implemented files:
 - `scripts/check_openapi_contract.py`
 - `tests/test_openapi_contract_check.py`
 - `.github/workflows/foundation-contract-check.yml`
+- `.github/workflows/foundation-optional-profiles.yml`
+- `scripts/ci_profiles.py`
 
 ## Checks
 
@@ -51,6 +53,12 @@ JSON report:
 python scripts/check_openapi_contract.py --json
 ```
 
+Inspect CI profiles:
+
+```bash
+python scripts/ci_profiles.py --profile all --json
+```
+
 Expected success output:
 
 ```text
@@ -59,13 +67,13 @@ openapi_contract_check=ok
 
 ## CI
 
-GitHub Actions workflow:
+Default workflow:
 
 ```text
 .github/workflows/foundation-contract-check.yml
 ```
 
-The workflow runs on:
+The default workflow runs on:
 
 - `push` to `main`
 - `pull_request`
@@ -76,35 +84,52 @@ It is path-filtered to changes under:
 - `qwen-novel2drama-llm/**`
 - `.github/workflows/foundation-contract-check.yml`
 
-Jobs:
+Default jobs:
 
-- `openapi-contract`: runs `python scripts/check_openapi_contract.py` and contract unit tests.
-- `lightweight-core-tests`: runs dependency-free service tests that do not require torch, transformers, peft or provider SDKs.
+- `openapi-contract`: runs `contracts` profile.
+- `lightweight-core-tests`: runs `core` profile.
 
-Current CI commands:
+Optional workflow:
+
+```text
+.github/workflows/foundation-optional-profiles.yml
+```
+
+Optional profile selections:
+
+- `optional`
+- `provider-adapter`
+- `api-server`
+- `local-provider-contract`
+- `heavyweight`
+- `local-model-imports`
+- `all`
+
+Current default CI commands:
 
 ```bash
 python scripts/check_openapi_contract.py
 python -m unittest tests.test_openapi_contract_check tests.test_foundation_contracts
-python -m unittest tests.test_foundation_core_services tests.test_memory_store tests.test_rule_engine tests.test_auth_service tests.test_auth_audit_rate_limit tests.test_usage_reconciliation tests.test_model_tool_loop_usage tests.test_provider_continuation tests.test_workspace_quota tests.test_skill_registry tests.test_mcp_adapter
+python -m unittest tests.test_foundation_core_services tests.test_memory_store tests.test_rule_engine tests.test_auth_service tests.test_auth_audit_rate_limit tests.test_usage_reconciliation tests.test_model_tool_loop_usage tests.test_provider_continuation tests.test_ci_profiles tests.test_workspace_quota tests.test_skill_registry tests.test_mcp_adapter
 ```
 
 ## Purpose
 
 The foundation API now includes router, token/cost, memory, rules, skills, MCP, API key mode, provider execution, provider streaming, streamed tool-call reconstruction, Agent stream tool bridge, incremental stream tool execution, same-stream continuation fallback events, workspace quota controls, Agent tool loop controls and live Agent event reads.
 
-This check helps keep runtime routes and the static OpenAPI file consistent as the API changes.
+This check helps keep runtime routes and the static OpenAPI file consistent as the API changes while keeping heavyweight provider/model dependency checks in separate opt-in profiles.
 
 ## Current limitations
 
 - The script uses lightweight static parsing.
 - It checks paths and important tokens, not full OpenAPI semantic validity.
 - It only compares `/v1/*` runtime endpoints.
-- The CI workflow intentionally avoids heavyweight model/provider tests until dependency setup is defined.
+- Heavy local model profile checks dependency imports only; it does not download or load real model weights.
+- Real provider smoke tests with credentials are not implemented yet.
 
 ## Next steps
 
 - Add full OpenAPI schema validation later.
 - Add generated client smoke tests.
 - Add endpoint-level scope consistency checks later.
-- Add heavyweight provider/model CI once dependency profiles are defined.
+- Add provider-specific credential-gated smoke profiles later.
