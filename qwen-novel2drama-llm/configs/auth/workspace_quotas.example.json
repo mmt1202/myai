@@ -1,0 +1,35 @@
+{
+  "quota_name": "foundation_workspace_quotas_example_v1",
+  "default": {
+    "enabled": true,
+    "daily": {
+      "max_requests": 1000,
+      "max_input_tokens": 1000000,
+      "max_output_tokens": 500000,
+      "max_total_tokens": 1500000,
+      "max_cost": 25.0
+    },
+    "monthly": {
+      "max_requests": 20000,
+      "max_input_tokens": 20000000,
+      "max_output_tokens": 10000000,
+      "max_total_tokens": 30000000,
+      "max_cost": 500.0
+    }
+  },
+  "workspaces": {
+    "dev-workspace": {
+      "enabled": true,
+      "daily": {
+        "max_requests": 5000,
+        "max_total_tokens": 5000000,
+        "max_cost": 100.0
+      },
+      "monthly": {
+        "max_requests": 100000,
+        "max_total_tokens": 100000000,
+        "max_cost": 2000.0
+      }
+    }
+  }
+}
