@@ -276,8 +276,10 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
         raise ProviderError("model_not_found", "selected model id is missing")
     provider_request = build_provider_request(request, foundation_request, selected_model_id)
     use_stream = bool(request.get("stream_provider_tool_calls")) and bool(request.get("enable_model_tool_loop"))
+    incremental_stream = use_stream and bool(request.get("incremental_stream_tool_execution"))
+    registry = load_json(project_root / "configs" / "skills" / "foundation_skills.json") if incremental_stream else None
     if events:
-        events.emit("provider_started", status="running", data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run"), "stream_provider_tool_calls": use_stream})
+        events.emit("provider_started", status="running", data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run"), "stream_provider_tool_calls": use_stream, "incremental_stream_tool_execution": incremental_stream})
     response = generate_provider_round(
         provider_request,
         instances,
@@ -286,6 +288,12 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
         api_key_env=request.get("api_key_env") or "MODEL_API_KEY",
         stream=use_stream,
         stream_chunks_path=output_dir / "provider_stream_chunks.jsonl" if use_stream else None,
+        incremental_tools=incremental_stream,
+        registry=registry,
+        incremental_tool_results_path=output_dir / "incremental_tool_results.json" if incremental_stream else None,
+        allow_provider=bool(request.get("allow_model_tool_provider")),
+        allow_write=bool(request.get("allow_model_tool_write")),
+        approved=bool(request.get("approve_model_tools")),
     )
     run["provider_response"] = response
     if response.get("usage"):
@@ -294,7 +302,7 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
         run["cost"] = response["cost"]
     save_json(output_dir / "provider_response.json", response)
     record_usage(output_dir, run, provider_response=response)
-    step = add_step(run, "provider_generate", input_data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run"), "stream_provider_tool_calls": use_stream}, output_data=response, status="completed" if response.get("status") == "ok" else "failed")
+    step = add_step(run, "provider_generate", input_data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run"), "stream_provider_tool_calls": use_stream, "incremental_stream_tool_execution": incremental_stream}, output_data=response, status="completed" if response.get("status") == "ok" else "failed")
     if response.get("status") != "ok":
         if events:
             events.emit("provider_failed", status="failed", step=step, data={"model_id": selected_model_id}, error="provider response was not ok")
@@ -312,7 +320,7 @@ def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[st
         return
     max_rounds = int(request.get("max_tool_rounds") or 3)
     if events:
-        events.emit("model_tool_loop_started", status="running", data={"model_id": selected_model_id, "max_rounds": max_rounds, "stream_provider_tool_calls": bool(request.get("stream_provider_tool_calls"))})
+        events.emit("model_tool_loop_started", status="running", data={"model_id": selected_model_id, "max_rounds": max_rounds, "stream_provider_tool_calls": bool(request.get("stream_provider_tool_calls")), "incremental_stream_tool_execution": bool(request.get("incremental_stream_tool_execution"))})
     summary = run_model_tool_loop(
         project_root=project_root,
         output_dir=output_dir,
@@ -330,13 +338,13 @@ def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[st
         run["usage"] = run["provider_response"]["usage"]
     if (run.get("provider_response") or {}).get("cost"):
         run["cost"] = run["provider_response"]["cost"]
-    step = add_step(run, "model_tool_loop", status="completed" if summary.get("status") == "ok" else "failed", output_data={"status": summary.get("status"), "round_count": summary.get("round_count", len(summary.get("rounds", []))), "error": summary.get("error"), "stream_provider_tool_calls": summary.get("stream_provider_tool_calls")})
+    step = add_step(run, "model_tool_loop", status="completed" if summary.get("status") == "ok" else "failed", output_data={"status": summary.get("status"), "round_count": summary.get("round_count", len(summary.get("rounds", []))), "error": summary.get("error"), "stream_provider_tool_calls": summary.get("stream_provider_tool_calls"), "incremental_stream_tool_execution": summary.get("incremental_stream_tool_execution")})
     if summary.get("status") != "ok":
         if events:
             events.emit("model_tool_loop_failed", status="failed", step=step, data={"round_count": summary.get("round_count", len(summary.get("rounds", [])))}, error=str(summary.get("error") or "model tool loop failed"))
         raise SkillError(str(summary.get("error") or "model tool loop failed"))
     if events:
-        events.emit("model_tool_loop_completed", status="completed", step=step, data={"round_count": summary.get("round_count", len(summary.get("rounds", []))), "stream_provider_tool_calls": summary.get("stream_provider_tool_calls")})
+        events.emit("model_tool_loop_completed", status="completed", step=step, data={"round_count": summary.get("round_count", len(summary.get("rounds", []))), "stream_provider_tool_calls": summary.get("stream_provider_tool_calls"), "incremental_stream_tool_execution": summary.get("incremental_stream_tool_execution")})
 
 
 def attach_artifacts(output_dir: Path, run: dict[str, Any]) -> None:
@@ -349,6 +357,8 @@ def attach_artifacts(output_dir: Path, run: dict[str, Any]) -> None:
         run["artifacts"]["provider_response"] = str(output_dir / "provider_response.json")
     if (run.get("provider_response") or {}).get("stream_chunks_path"):
         run["artifacts"]["provider_stream_chunks"] = str((run.get("provider_response") or {}).get("stream_chunks_path"))
+    if (run.get("provider_response") or {}).get("incremental_tool_results_path"):
+        run["artifacts"]["incremental_tool_results"] = str((run.get("provider_response") or {}).get("incremental_tool_results_path"))
     if run.get("skill_results"):
         run["artifacts"]["skill_results"] = str(output_dir / "skill_results.json")
     if run.get("model_tool_loop"):
@@ -462,6 +472,7 @@ def main() -> int:
     parser.add_argument("--enable-model-tool-loop", action="store_true")
     parser.add_argument("--max-tool-rounds", type=int, default=None)
     parser.add_argument("--stream-provider-tool-calls", action="store_true")
+    parser.add_argument("--incremental-stream-tool-execution", action="store_true")
     parser.add_argument("--stream-include-usage", action="store_true")
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--api-key-env", default="MODEL_API_KEY")
@@ -485,6 +496,10 @@ def main() -> int:
         request["max_tool_rounds"] = args.max_tool_rounds
     if args.stream_provider_tool_calls:
         request["stream_provider_tool_calls"] = True
+    if args.incremental_stream_tool_execution:
+        request["incremental_stream_tool_execution"] = True
+        request["stream_provider_tool_calls"] = True
+        request["enable_model_tool_loop"] = True
     if args.stream_include_usage:
         request["stream_include_usage"] = True
     if args.base_url:
