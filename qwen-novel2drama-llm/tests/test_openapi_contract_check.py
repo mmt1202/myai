@@ -57,6 +57,7 @@ class OpenApiContractCheckTests(unittest.TestCase):
                 "    dry_run_provider:\n"
                 "    stream:\n"
                 "    stream_provider_tool_calls:\n"
+                "    incremental_stream_tool_execution:\n"
                 "    stream_include_usage:\n"
                 "    stream_options:\n"
                 "    stream_chunk_chars:\n"
