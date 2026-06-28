@@ -333,6 +333,9 @@ components:
         enable_model_tool_loop: {type: boolean, default: false}
         stream_provider_tool_calls: {type: boolean, default: false}
         incremental_stream_tool_execution: {type: boolean, default: false}
+        workspace_quota_enabled: {type: boolean, default: false}
+        workspace_quota_config_path: {type: string}
+        workspace_quota_state_path: {type: string}
         max_tool_rounds: {type: integer, default: 3}
         allow_model_tool_provider: {type: boolean, default: false}
         allow_model_tool_write: {type: boolean, default: false}
