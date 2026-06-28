@@ -98,7 +98,7 @@ class FoundationApiServerTests(unittest.TestCase):
                 api_server.AGENT_OUTPUT_DIR = original
 
     def test_agent_lifecycle_status_cancel_retry_resume_api(self) -> None:
-        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+        with tempfile.TemporaryDirectory() as tmpdir:
             original = api_server.AGENT_OUTPUT_DIR
             api_server.AGENT_OUTPUT_DIR = Path(tmpdir)
             try:
