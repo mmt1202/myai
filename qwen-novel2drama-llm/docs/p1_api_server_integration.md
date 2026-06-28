@@ -6,6 +6,7 @@ Implemented files:
 
 - `inference/api_server.py`
 - `agent/run_store.py`
+- `agent/sqlite_run_store.py`
 - `tests/test_api_server_foundation.py`
 
 ## Start server
@@ -108,7 +109,7 @@ Provider preflight only:
 }
 ```
 
-Agent events are written to:
+Agent events are written to the selected run store's artifact directory. With the default file store:
 
 ```text
 outputs/agent_runtime/api/<request_id-or-run_id-or-latest>/events.jsonl
@@ -130,19 +131,36 @@ GET /v1/agent/events?run_id=demo-run&stream=true
 
 The API server exposes lifecycle controls from `agent/lifecycle.py`.
 
-Lifecycle functions now use the `agent/run_store.py` boundary:
+Lifecycle functions use the `agent/run_store.py` boundary:
 
 ```text
 RunStore
 FileRunStore
-file_run_store(output_root)
+SQLiteRunStore
+build_run_store(kind, output_root, sqlite_path=None)
 ```
 
-The current API server uses `FileRunStore` under:
+The default API server store is file-backed under:
 
 ```text
 outputs/agent_runtime/api/<run_id>/
 ```
+
+To use SQLite for Agent lifecycle status/cancel/retry/resume and minimal run indexing:
+
+```bash
+FOUNDATION_AGENT_RUN_STORE=sqlite \
+FOUNDATION_AGENT_RUN_DB=outputs/agent_runtime/runs.sqlite \
+python inference/api_server.py --skip-model-load
+```
+
+Supported values:
+
+```text
+FOUNDATION_AGENT_RUN_STORE=file|sqlite
+```
+
+When `/v1/agent/run` completes, the API server saves the request and final report into the selected run store. Runtime artifacts still remain file-backed until the later runtime write migration task.
 
 Status:
 
@@ -192,17 +210,17 @@ All lifecycle endpoints use `agent:run` auth scope.
 
 Current lifecycle behavior:
 
-- `status` reads `agent_run_report.json` and `events.jsonl` through `FileRunStore`.
-- `cancel` writes `cancel_requested.json` through `FileRunStore` and updates non-terminal reports to `cancelled`.
-- `retry` loads `agent_request.json`, merges overrides, and creates a child run with `retry_of`.
-- `resume` loads `agent_request.json`, merges overrides, and creates a child run with `resume_of`.
+- `status` reads through the selected run store.
+- `cancel` writes the cancel marker through the selected run store and updates non-terminal reports to `cancelled`.
+- `retry` loads the original request through the selected run store, merges overrides, and creates a child run with `retry_of`.
+- `resume` loads the original request through the selected run store, merges overrides, and creates a child run with `resume_of`.
 
 ## Current limitations
 
 - Agent SSE currently polls the JSONL event file.
-- `FileRunStore` is the only implemented run store.
-- Runtime writes still use file paths directly; lifecycle reads/writes use the store boundary.
-- No SQLite/Postgres run store yet.
+- Runtime writes still use file paths directly; API/lifecycle index request/report into the selected store.
+- SQLite is local-only and not a distributed run store.
+- No Postgres run store yet.
 - No transaction, lock, lease or distributed concurrency control yet.
 - Cancel is cooperative and does not forcibly terminate an in-flight provider call.
 - Retry/resume are replay-based child runs, not arbitrary stack-frame continuation.
@@ -215,8 +233,9 @@ Current lifecycle behavior:
 
 ## Next steps
 
-- Add SQLite/Postgres run store implementation.
 - Migrate runtime artifact writes to the run store interface.
+- Add DB-backed Agent events.
+- Add run listing and query filters.
 - Add distributed quota/rate limit backend.
 - Add provider-native bidirectional continuation adapter.
 - Add secret-gated real provider smoke tests.
