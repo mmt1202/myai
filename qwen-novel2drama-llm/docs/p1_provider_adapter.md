@@ -143,7 +143,7 @@ The final completed event can include:
 }
 ```
 
-The provider adapter only reconstructs tool calls; it does not execute them.
+The provider adapter reconstructs tool calls. `/v1/chat` does not execute them; Agent can bridge them into the model tool loop with `stream_provider_tool_calls`.
 
 ## Local text provider
 
@@ -233,6 +233,8 @@ Real local execution requires `model_path` in the request or `FOUNDATION_LOCAL_M
 - stream a provider through `stream_generate_with_registry`
 - return standard response envelopes on provider errors
 
+Agent's model tool loop can convert stream chunks into a normal provider response, then consume reconstructed tool calls through the same tool execution path.
+
 ## Dry run
 
 ```bash
@@ -306,14 +308,14 @@ FOUNDATION_LOCAL_MODEL_PATH=/path/to/model python providers/factory.py \
 - Local cache is process-local, not distributed.
 - Generation serialization is per-process, not cluster-wide.
 - Streamed tool-call reconstruction supports OpenAI-style function tool calls only.
-- Reconstructed tool calls are not automatically executed by the provider adapter.
+- Agent bridge waits for the provider stream to complete before executing reconstructed tool calls.
 - Image/video/audio generation adapters are not implemented yet.
 - Provider-specific tokenizer reconciliation is not implemented yet.
 - Provider health probing is still basic.
 
 ## Next steps
 
-- Bridge streamed provider tool calls into Agent tool loop execution.
+- Add live incremental tool execution while provider stream is still open.
 - Add provider usage reconciliation after provider calls.
 - Add local provider warmup endpoint.
 - Add local provider memory-pressure eviction policy.
