@@ -14,6 +14,13 @@ from providers.base import ProviderError
 from services.rule_engine import evaluate_rules, load_rules
 from services.usage_ledger import write_event
 from services.usage_reconciliation import reconcile_provider_usage, reconciled_cost, reconciled_usage
+from services.workspace_quota import (
+    check_workspace_quota_from_paths,
+    quota_config_path_from_env,
+    quota_enabled_from_env,
+    quota_state_path_from_env,
+    record_workspace_usage_to_path,
+)
 from skills.registry import SkillError, call_skill
 
 RUN_STATES = {"queued", "running", "waiting_tool", "waiting_approval", "completed", "failed", "cancelled"}
@@ -57,6 +64,7 @@ def create_run(request: dict[str, Any]) -> dict[str, Any]:
         "session_id": request.get("session_id"),
         "owner_id": request.get("owner_id"),
         "project_id": request.get("project_id"),
+        "workspace_id": request.get("workspace_id"),
         "task": request.get("task") or "",
         "input": request.get("input") or [],
         "route_mode": request.get("route_mode") or "balanced",
@@ -69,6 +77,8 @@ def create_run(request: dict[str, Any]) -> dict[str, Any]:
         "model_tool_loop": None,
         "provider_response": None,
         "usage_reconciliation": None,
+        "workspace_quota_check": None,
+        "workspace_quota_usage": None,
         "event_summary": {},
         "usage": {},
         "cost": {},
@@ -127,6 +137,7 @@ def build_foundation_request(run: dict[str, Any]) -> dict[str, Any]:
         "expected_reasoning_tokens",
         "max_sensitivity",
         "owner_id",
+        "workspace_id",
         "temperature",
         "max_output_tokens",
         "tools",
@@ -201,12 +212,71 @@ def record_usage(output_dir: Path, run: dict[str, Any], provider_response: dict[
             "trace_id": run.get("run_id"),
             "model_id": (run.get("route_decision") or {}).get("selected_model_id"),
             "provider": (((run.get("route_decision") or {}).get("selected") or {}).get("provider")),
+            "workspace_id": run.get("workspace_id"),
             "route_mode": run.get("route_mode"),
             "usage": usage,
             "cost": cost,
             "status": "actual" if provider_response else "estimated",
         },
     )
+
+
+def quota_is_enabled(request: dict[str, Any]) -> bool:
+    if request.get("workspace_quota_enabled") is not None:
+        return bool(request.get("workspace_quota_enabled"))
+    return quota_enabled_from_env()
+
+
+def workspace_id_for_run(run: dict[str, Any], request: dict[str, Any]) -> str:
+    return str(request.get("workspace_id") or run.get("workspace_id") or run.get("owner_id") or "default")
+
+
+def quota_config_path(project_root: Path, request: dict[str, Any]) -> Path:
+    return Path(request.get("workspace_quota_config_path") or quota_config_path_from_env(project_root))
+
+
+def quota_state_path(project_root: Path, request: dict[str, Any]) -> Path:
+    return Path(request.get("workspace_quota_state_path") or quota_state_path_from_env(project_root))
+
+
+def check_workspace_quota_preflight(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], route_decision: dict[str, Any]) -> dict[str, Any] | None:
+    if not quota_is_enabled(request):
+        return None
+    selected = route_decision.get("selected") or {}
+    report = check_workspace_quota_from_paths(
+        config_path=quota_config_path(project_root, request),
+        state_path=quota_state_path(project_root, request),
+        workspace_id=workspace_id_for_run(run, request),
+        usage=route_decision.get("estimated_usage") or {},
+        cost=selected.get("estimated_cost") or {},
+    )
+    run["workspace_quota_check"] = report
+    save_json(output_dir / "workspace_quota_check.json", report)
+    if not report.get("allowed", True):
+        raise ProviderError("workspace_quota_exceeded", "workspace quota exceeded", details=report)
+    return report
+
+
+def record_workspace_quota_actual(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], provider_response: dict[str, Any]) -> dict[str, Any] | None:
+    if not quota_is_enabled(request):
+        return None
+    report = record_workspace_usage_to_path(
+        state_path=quota_state_path(project_root, request),
+        workspace_id=workspace_id_for_run(run, request),
+        usage=provider_response.get("usage") or run.get("usage") or {},
+        cost=provider_response.get("cost") or run.get("cost") or {},
+        metadata={
+            "request_id": run.get("run_id"),
+            "trace_id": run.get("run_id"),
+            "model_id": (run.get("route_decision") or {}).get("selected_model_id"),
+            "provider": (((run.get("route_decision") or {}).get("selected") or {}).get("provider")),
+            "source": "agent_provider_actual",
+        },
+    )
+    run["workspace_quota_usage"] = report
+    provider_response["workspace_quota_usage"] = report
+    save_json(output_dir / "workspace_quota_usage.json", report)
+    return report
 
 
 def apply_usage_reconciliation(
@@ -302,6 +372,9 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
     selected_model_id = route_decision.get("selected_model_id")
     if not selected_model_id:
         raise ProviderError("model_not_found", "selected model id is missing")
+    quota_report = check_workspace_quota_preflight(project_root, output_dir, run, request, route_decision)
+    if events and quota_report:
+        events.emit("workspace_quota_checked", status="completed", data={"workspace_id": quota_report.get("workspace_id"), "decision": quota_report.get("decision"), "violations": quota_report.get("violations") or []})
     provider_request = build_provider_request(request, foundation_request, selected_model_id)
     use_stream = bool(request.get("stream_provider_tool_calls")) and bool(request.get("enable_model_tool_loop"))
     incremental_stream = use_stream and bool(request.get("incremental_stream_tool_execution"))
@@ -326,8 +399,11 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
     run["provider_response"] = response
     if response.get("status") == "ok":
         report = apply_usage_reconciliation(output_dir, run, route_decision, response, instances)
+        quota_usage = record_workspace_quota_actual(project_root, output_dir, run, request, response)
         if events:
             events.emit("usage_reconciled", status="completed", data={"model_id": selected_model_id, "usage_source": report.get("usage_source"), "summary": report.get("summary") or {}})
+            if quota_usage:
+                events.emit("workspace_quota_recorded", status="completed", data={"workspace_id": quota_usage.get("workspace_id"), "increment": quota_usage.get("increment") or {}})
     else:
         if response.get("usage"):
             run["usage"] = response["usage"]
@@ -335,7 +411,7 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
             run["cost"] = response["cost"]
     save_json(output_dir / "provider_response.json", response)
     record_usage(output_dir, run, provider_response=response)
-    step = add_step(run, "provider_generate", input_data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run"), "stream_provider_tool_calls": use_stream, "incremental_stream_tool_execution": incremental_stream}, output_data=response, status="completed" if response.get("status") == "ok" else "failed")
+    step = add_step(run, "provider_generate", input_data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run"), "stream_provider_tool_calls": use_stream, "incremental_stream_tool_execution": incremental_stream, "workspace_quota_enabled": quota_is_enabled(request)}, output_data=response, status="completed" if response.get("status") == "ok" else "failed")
     if response.get("status") != "ok":
         if events:
             events.emit("provider_failed", status="failed", step=step, data={"model_id": selected_model_id}, error="provider response was not ok")
@@ -399,6 +475,10 @@ def attach_artifacts(output_dir: Path, run: dict[str, Any]) -> None:
         run["artifacts"]["provider_usage_reconciliation"] = str(output_dir / "provider_usage_reconciliation.json")
     if (output_dir / "provider_usage_reconciliation_final.json").exists():
         run["artifacts"]["provider_usage_reconciliation_final"] = str(output_dir / "provider_usage_reconciliation_final.json")
+    if (output_dir / "workspace_quota_check.json").exists():
+        run["artifacts"]["workspace_quota_check"] = str(output_dir / "workspace_quota_check.json")
+    if (output_dir / "workspace_quota_usage.json").exists():
+        run["artifacts"]["workspace_quota_usage"] = str(output_dir / "workspace_quota_usage.json")
     if (run.get("provider_response") or {}).get("stream_chunks_path"):
         run["artifacts"]["provider_stream_chunks"] = str((run.get("provider_response") or {}).get("stream_chunks_path"))
     if (run.get("provider_response") or {}).get("incremental_tool_results_path"):
@@ -518,6 +598,10 @@ def main() -> int:
     parser.add_argument("--stream-provider-tool-calls", action="store_true")
     parser.add_argument("--incremental-stream-tool-execution", action="store_true")
     parser.add_argument("--stream-include-usage", action="store_true")
+    parser.add_argument("--workspace-quota-enabled", action="store_true")
+    parser.add_argument("--workspace-quota-config", default=None)
+    parser.add_argument("--workspace-quota-state", default=None)
+    parser.add_argument("--workspace-id", default=None)
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--api-key-env", default="MODEL_API_KEY")
     parser.add_argument("--allow-skill-provider", action="store_true")
@@ -546,6 +630,14 @@ def main() -> int:
         request["enable_model_tool_loop"] = True
     if args.stream_include_usage:
         request["stream_include_usage"] = True
+    if args.workspace_quota_enabled:
+        request["workspace_quota_enabled"] = True
+    if args.workspace_quota_config:
+        request["workspace_quota_config_path"] = args.workspace_quota_config
+    if args.workspace_quota_state:
+        request["workspace_quota_state_path"] = args.workspace_quota_state
+    if args.workspace_id:
+        request["workspace_id"] = args.workspace_id
     if args.base_url:
         request["base_url"] = args.base_url
     if args.api_key_env:
