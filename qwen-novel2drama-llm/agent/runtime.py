@@ -55,7 +55,57 @@ def save_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def cancellation_request(output_dir: Path) -> dict[str, Any] | None:
+def maybe_store_save_request(store: Any | None, run_id: str, request: dict[str, Any]) -> None:
+    if store is not None and hasattr(store, "save_request"):
+        store.save_request(run_id, request)
+
+
+def maybe_store_save_report(store: Any | None, run_id: str, run: dict[str, Any]) -> None:
+    if store is not None and hasattr(store, "save_report"):
+        store.save_report(run_id, run)
+
+
+def maybe_store_save_created_run(store: Any | None, run_id: str, run: dict[str, Any], path: Path) -> None:
+    if store is not None and hasattr(store, "save_artifact"):
+        store.save_artifact(run_id, "created_run", run, path=str(path))
+
+
+def maybe_store_save_artifact(store: Any | None, run_id: str, name: str, artifact_path: str) -> None:
+    if store is not None and hasattr(store, "save_artifact"):
+        store.save_artifact(run_id, name, {"path": artifact_path}, path=artifact_path)
+
+
+def index_artifacts_in_store(store: Any | None, run: dict[str, Any]) -> None:
+    if store is None:
+        return
+    run_id = str(run.get("run_id") or "")
+    if not run_id:
+        return
+    for name, artifact_path in (run.get("artifacts") or {}).items():
+        maybe_store_save_artifact(store, run_id, str(name), str(artifact_path))
+
+
+def index_events_in_store(store: Any | None, output_dir: Path, run: dict[str, Any]) -> None:
+    if store is None or not hasattr(store, "append_event"):
+        return
+    run_id = str(run.get("run_id") or "")
+    if not run_id:
+        return
+    for event in read_agent_events(output_dir / "events.jsonl"):
+        try:
+            store.append_event(run_id, event)
+        except Exception:  # noqa: BLE001
+            continue
+
+
+def cancellation_request(output_dir: Path, store: Any | None = None, run_id: str | None = None) -> dict[str, Any] | None:
+    if store is not None and run_id and hasattr(store, "load_cancel_request"):
+        try:
+            marker = store.load_cancel_request(run_id)
+            if marker:
+                return marker
+        except Exception:  # noqa: BLE001
+            pass
     path = output_dir / CANCEL_REQUEST_FILENAME
     if not path.exists():
         return None
@@ -65,8 +115,8 @@ def cancellation_request(output_dir: Path) -> dict[str, Any] | None:
         return {"reason": "cancel_requested", "source": str(path)}
 
 
-def apply_cancellation_if_requested(output_dir: Path, run: dict[str, Any], events: AgentEventWriter | None = None, *, checkpoint: str = "checkpoint") -> bool:
-    marker = cancellation_request(output_dir)
+def apply_cancellation_if_requested(output_dir: Path, run: dict[str, Any], events: AgentEventWriter | None = None, *, checkpoint: str = "checkpoint", store: Any | None = None) -> bool:
+    marker = cancellation_request(output_dir, store, run.get("run_id"))
     if not marker or run.get("status") in TERMINAL_STATES:
         return False
     step = add_step(run, "cancel_check", status="cancelled", input_data={"checkpoint": checkpoint}, output_data=marker, error=marker.get("reason"))
@@ -346,7 +396,7 @@ def normalize_skill_call(call: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run_skill_loop(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], events: AgentEventWriter | None = None) -> None:
+def run_skill_loop(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], events: AgentEventWriter | None = None, store: Any | None = None) -> None:
     calls = request.get("skill_calls") or []
     if not calls:
         return
@@ -359,7 +409,7 @@ def run_skill_loop(project_root: Path, output_dir: Path, run: dict[str, Any], re
     if events:
         events.emit("skill_loop_started", status="running", step=step, data={"skill_call_count": len(calls)})
     for raw_call in calls:
-        if apply_cancellation_if_requested(output_dir, run, events, checkpoint="skill_loop"):
+        if apply_cancellation_if_requested(output_dir, run, events, checkpoint="skill_loop", store=store):
             return
         call = normalize_skill_call(raw_call)
         allow_provider = default_allow_provider or call["allow_provider"]
@@ -397,16 +447,16 @@ def run_skill_loop(project_root: Path, output_dir: Path, run: dict[str, Any], re
         events.emit("skill_loop_completed", status="completed", step=step, data={"skill_result_count": len(results)})
 
 
-def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any], events: AgentEventWriter | None = None) -> dict[str, Any]:
+def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any], events: AgentEventWriter | None = None, store: Any | None = None) -> dict[str, Any]:
     selected_model_id = route_decision.get("selected_model_id")
     if not selected_model_id:
         raise ProviderError("model_not_found", "selected model id is missing")
-    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="before_provider"):
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="before_provider", store=store):
         raise ProviderError("cancelled", "agent run was cancelled")
     quota_report = check_workspace_quota_preflight(project_root, output_dir, run, request, route_decision)
     if events and quota_report:
         events.emit("workspace_quota_checked", status="completed", data={"workspace_id": quota_report.get("workspace_id"), "decision": quota_report.get("decision"), "violations": quota_report.get("violations") or []})
-    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="after_quota"):
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="after_quota", store=store):
         raise ProviderError("cancelled", "agent run was cancelled")
     provider_request = build_provider_request(request, foundation_request, selected_model_id)
     use_stream = bool(request.get("stream_provider_tool_calls")) and bool(request.get("enable_model_tool_loop"))
@@ -454,10 +504,10 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
     return response
 
 
-def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any], provider_response: dict[str, Any], events: AgentEventWriter | None = None) -> None:
+def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any], provider_response: dict[str, Any], events: AgentEventWriter | None = None, store: Any | None = None) -> None:
     if not request.get("enable_model_tool_loop"):
         return
-    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="before_model_tool_loop"):
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="before_model_tool_loop", store=store):
         return
     selected_model_id = route_decision.get("selected_model_id")
     if not selected_model_id:
@@ -527,32 +577,39 @@ def attach_artifacts(output_dir: Path, run: dict[str, Any]) -> None:
         run["artifacts"]["model_tool_loop"] = str(output_dir / "model_tool_loop.json")
 
 
-def finalize_events(output_dir: Path, run: dict[str, Any]) -> None:
+def finalize_events(output_dir: Path, run: dict[str, Any], store: Any | None = None) -> None:
     events = read_agent_events(output_dir / "events.jsonl")
     run["event_summary"] = summarize_agent_events(events)
+    index_events_in_store(store, output_dir, run)
 
 
-def finalize_run(output_dir: Path, run: dict[str, Any]) -> dict[str, Any]:
+def finalize_run(output_dir: Path, run: dict[str, Any], store: Any | None = None) -> dict[str, Any]:
     attach_artifacts(output_dir, run)
-    finalize_events(output_dir, run)
+    finalize_events(output_dir, run, store)
     save_json(output_dir / "agent_run_report.json", run)
+    maybe_store_save_report(store, str(run.get("run_id")), run)
+    index_artifacts_in_store(store, run)
     return run
 
 
-def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path, instances_path: Path | None = None, rules_path: Path | None = None) -> dict[str, Any]:
+def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path, instances_path: Path | None = None, rules_path: Path | None = None, store: Any | None = None) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    save_json(output_dir / "agent_request.json", request)
     run = create_run(request)
+    request_to_save = {**request, "run_id": request.get("run_id") or run["run_id"]}
+    save_json(output_dir / "agent_request.json", request_to_save)
+    maybe_store_save_request(store, run["run_id"], request_to_save)
     events = AgentEventWriter(output_dir / "events.jsonl", run, enabled=not bool(request.get("disable_events")))
     events.emit("run_created", status="queued", data={"task": run.get("task"), "route_mode": run.get("route_mode"), "retry_of": run.get("retry_of"), "resume_of": run.get("resume_of")})
-    save_json(output_dir / "agent_run_created.json", run)
-    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="created"):
-        return finalize_run(output_dir, run)
+    created_path = output_dir / "agent_run_created.json"
+    save_json(created_path, run)
+    maybe_store_save_created_run(store, run["run_id"], run, created_path)
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="created", store=store):
+        return finalize_run(output_dir, run, store)
     transition(run, "running")
     step = add_step(run, "start", output_data={"status": "running"})
     events.emit("run_started", status="running", step=step)
-    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="started"):
-        return finalize_run(output_dir, run)
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="started", store=store):
+        return finalize_run(output_dir, run, store)
 
     foundation_request = build_foundation_request({**run, **request})
     instances = load_json(instances_path or project_root / "configs" / "model_instance_registry.json")
@@ -564,14 +621,14 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
         run["cost"] = (route_decision["selected"].get("estimated_cost") or {})
     step = add_step(run, "route_model", input_data=foundation_request, output_data=route_decision, status="completed" if route_decision.get("status") == "routed" else "failed")
     events.emit("route_completed" if route_decision.get("status") == "routed" else "route_failed", status=step["status"], step=step, data={"selected_model_id": route_decision.get("selected_model_id"), "route_status": route_decision.get("status")})
-    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="after_route"):
-        return finalize_run(output_dir, run)
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="after_route", store=store):
+        return finalize_run(output_dir, run, store)
 
     if route_decision.get("status") != "routed":
         run["error"] = "router_no_candidate"
         transition(run, "failed")
         events.emit("run_failed", status="failed", message="router_no_candidate", error="router_no_candidate")
-        return finalize_run(output_dir, run)
+        return finalize_run(output_dir, run, store)
 
     ruleset = load_rules(rules_path or project_root / "configs" / "rules" / "default_rules.yaml")
     rule_context = rule_context_from_route(foundation_request, route_decision, instances)
@@ -580,8 +637,8 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
     run["rule_decision"] = rule_decision
     step = add_step(run, "evaluate_rules", input_data=rule_context, output_data=rule_decision)
     events.emit("rules_completed", status="completed", step=step, data={"decision": rule_decision.get("decision"), "matched_rule_count": len(rule_decision.get("matched_rules") or [])})
-    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="after_rules"):
-        return finalize_run(output_dir, run)
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="after_rules", store=store):
+        return finalize_run(output_dir, run, store)
 
     if rule_decision.get("decision") == "deny":
         run["error"] = "policy_denied"
@@ -595,9 +652,9 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
         events.emit("run_waiting_approval", status="waiting_approval", step=step, message="approval_required")
     else:
         try:
-            run_skill_loop(project_root, output_dir, run, request, events)
+            run_skill_loop(project_root, output_dir, run, request, events, store)
             if run.get("status") == "cancelled":
-                return finalize_run(output_dir, run)
+                return finalize_run(output_dir, run, store)
         except SkillError as exc:
             run["error"] = "skill_failed"
             step = add_step(run, "skill_loop_error", status="failed", output_data={"message": str(exc)}, error=str(exc))
@@ -606,14 +663,14 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
             transition(run, "failed")
             events.emit("run_failed", status="failed", message="skill_failed", error=str(exc))
         else:
-            if apply_cancellation_if_requested(output_dir, run, events, checkpoint="before_provider_branch"):
-                return finalize_run(output_dir, run)
+            if apply_cancellation_if_requested(output_dir, run, events, checkpoint="before_provider_branch", store=store):
+                return finalize_run(output_dir, run, store)
             if request.get("execute_provider"):
                 try:
-                    provider_response = run_provider_step(project_root, output_dir, run, request, foundation_request, route_decision, instances, events)
-                    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="after_provider"):
-                        return finalize_run(output_dir, run)
-                    maybe_run_model_tool_loop(project_root, output_dir, run, request, foundation_request, route_decision, instances, provider_response, events)
+                    provider_response = run_provider_step(project_root, output_dir, run, request, foundation_request, route_decision, instances, events, store)
+                    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="after_provider", store=store):
+                        return finalize_run(output_dir, run, store)
+                    maybe_run_model_tool_loop(project_root, output_dir, run, request, foundation_request, route_decision, instances, provider_response, events, store)
                     if run.get("status") != "cancelled":
                         transition(run, "completed")
                         events.emit("run_completed", status="completed", data={"usage": run.get("usage") or {}, "cost": run.get("cost") or {}})
@@ -625,7 +682,7 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
                     events.emit("run_failed", status="failed", message="model_tool_loop_failed", error=str(exc))
                 except ProviderError as exc:
                     if exc.code == "cancelled" and run.get("status") == "cancelled":
-                        return finalize_run(output_dir, run)
+                        return finalize_run(output_dir, run, store)
                     run["error"] = exc.code
                     step = add_step(run, "provider_error", status="failed", output_data={"code": exc.code, "message": exc.message, "details": exc.details}, error=exc.message)
                     events.emit("provider_failed", status="failed", step=step, error=exc.message, data={"code": exc.code, "details": exc.details})
@@ -635,11 +692,11 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
                 step = add_step(run, "ready_for_provider", output_data={"selected_model_id": route_decision.get("selected_model_id"), "provider_execution": "skipped"})
                 events.emit("provider_skipped", status="completed", step=step, data={"selected_model_id": route_decision.get("selected_model_id")})
                 record_usage(output_dir, run)
-                if not apply_cancellation_if_requested(output_dir, run, events, checkpoint="provider_skipped"):
+                if not apply_cancellation_if_requested(output_dir, run, events, checkpoint="provider_skipped", store=store):
                     transition(run, "completed")
                     events.emit("run_completed", status="completed", data={"usage": run.get("usage") or {}, "cost": run.get("cost") or {}})
 
-    return finalize_run(output_dir, run)
+    return finalize_run(output_dir, run, store)
 
 
 def main() -> int:
@@ -649,6 +706,8 @@ def main() -> int:
     parser.add_argument("--output-dir", default="outputs/agent_runtime/run")
     parser.add_argument("--instances", default=None)
     parser.add_argument("--rules", default=None)
+    parser.add_argument("--run-store", choices=["none", "file", "sqlite", "sqlite3"], default="none")
+    parser.add_argument("--sqlite-path", default=None)
     parser.add_argument("--execute-provider", action="store_true")
     parser.add_argument("--dry-run-provider", action="store_true")
     parser.add_argument("--enable-model-tool-loop", action="store_true")
@@ -671,6 +730,7 @@ def main() -> int:
     parser.add_argument("--disable-events", action="store_true")
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
+    output_dir = Path(args.output_dir)
     request = load_json(Path(args.request))
     if args.execute_provider:
         request["execute_provider"] = True
@@ -714,7 +774,14 @@ def main() -> int:
         request["approve_model_tools"] = True
     if args.disable_events:
         request["disable_events"] = True
-    run = run_agent_once(project_root, request, Path(args.output_dir), Path(args.instances) if args.instances else None, Path(args.rules) if args.rules else None)
+    store = None
+    if args.run_store != "none":
+        from agent.run_store import build_run_store
+
+        store = build_run_store(args.run_store, output_dir, sqlite_path=Path(args.sqlite_path) if args.sqlite_path else None)
+        if request.get("run_id"):
+            output_dir = store.run_dir(str(request["run_id"]))
+    run = run_agent_once(project_root, request, output_dir, Path(args.instances) if args.instances else None, Path(args.rules) if args.rules else None, store=store)
     print(json.dumps(run, ensure_ascii=False, indent=2))
     return 0 if run.get("status") == "completed" else 1
 
