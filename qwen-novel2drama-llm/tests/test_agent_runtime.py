@@ -93,6 +93,9 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertTrue(run["provider_response"]["output"]["dry_run"])
             self.assertTrue((Path(tmpdir) / "provider_response.json").exists())
             self.assertTrue((Path(tmpdir) / "usage_ledger.jsonl").exists())
+            self.assertTrue((Path(tmpdir) / "provider_usage_reconciliation.json").exists())
+            self.assertIn("usage_reconciliation", run["provider_response"])
+            self.assertIn("provider_usage_reconciliation", run["artifacts"])
 
     def test_run_agent_local_provider_dry_run_succeeds(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
@@ -111,6 +114,7 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertEqual(run["status"], "completed")
             self.assertEqual(run["provider_response"]["model"]["provider"], "local")
             self.assertTrue(run["provider_response"]["output"]["dry_run"])
+            self.assertIn("usage_reconciliation", run["provider_response"])
 
     def test_run_agent_executes_stream_provider_tool_bridge_dry_run(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
