@@ -20,6 +20,7 @@ class FoundationApiServerTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertIn("router", result["capabilities"])
         self.assertIn("agent_events", result["capabilities"])
+        self.assertIn("agent_lifecycle", result["capabilities"])
         self.assertIn("provider_stream", result["capabilities"])
 
     def test_token_count_api(self) -> None:
@@ -93,6 +94,43 @@ class FoundationApiServerTests(unittest.TestCase):
                 self.assertEqual(result["output"]["run_id"], "run1")
                 self.assertEqual(len(result["output"]["events"]), 2)
                 self.assertEqual(result["output"]["summary"]["terminal_event"]["event_type"], "run_completed")
+            finally:
+                api_server.AGENT_OUTPUT_DIR = original
+
+    def test_agent_lifecycle_status_cancel_retry_resume_api(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+            original = api_server.AGENT_OUTPUT_DIR
+            api_server.AGENT_OUTPUT_DIR = Path(tmpdir)
+            try:
+                run_result = api_server.agent_run_api({"run_id": "demo", "task": "hello", "route_mode": "balanced", "privacy": {"local_only": True}, "approval_policy": "never"})
+                self.assertEqual(run_result["status"], "ok")
+                status_result = api_server.agent_status_api(run_id="demo")
+                self.assertEqual(status_result["status"], "ok")
+                self.assertEqual(status_result["output"]["status"], "completed")
+
+                cancel_result = api_server.agent_cancel_api({"run_id": "cancel_me", "reason": "user_requested"})
+                self.assertEqual(cancel_result["status"], "ok")
+                self.assertEqual(cancel_result["output"]["status"], "cancelled")
+
+                retry_result = api_server.agent_retry_api({"run_id": "demo", "new_run_id": "demo_retry", "overrides": {"task": "retry hello"}})
+                self.assertEqual(retry_result["status"], "ok")
+                self.assertEqual(retry_result["output"]["new_run_id"], "demo_retry")
+                self.assertEqual(retry_result["output"]["run"]["retry_of"], "demo")
+
+                resume_result = api_server.agent_resume_api({"run_id": "demo", "new_run_id": "demo_resume", "allow_completed": True})
+                self.assertEqual(resume_result["status"], "ok")
+                self.assertEqual(resume_result["output"]["run"]["resume_of"], "demo")
+            finally:
+                api_server.AGENT_OUTPUT_DIR = original
+
+    def test_agent_lifecycle_missing_run_returns_failed_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original = api_server.AGENT_OUTPUT_DIR
+            api_server.AGENT_OUTPUT_DIR = Path(tmpdir)
+            try:
+                result = api_server.agent_status_api(run_id="missing")
+                self.assertEqual(result["status"], "failed")
+                self.assertEqual(result["error"]["code"], "agent_run_not_found")
             finally:
                 api_server.AGENT_OUTPUT_DIR = original
 
