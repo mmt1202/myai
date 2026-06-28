@@ -90,6 +90,36 @@ def stream_generate_with_registry(
     yield from provider.stream_generate(request)
 
 
+def continuation_capability_with_registry(
+    request: dict[str, Any],
+    registry: dict[str, Any],
+    *,
+    model_id: str | None = None,
+    base_url: str | None = None,
+    api_key_env: str = "MODEL_API_KEY",
+    timeout: int = 120,
+) -> dict[str, Any]:
+    provider = provider_for_request(request, registry, model_id=model_id, base_url=base_url, api_key_env=api_key_env, timeout=timeout)
+    capability = provider.continuation_capability()
+    return {**capability, "model": provider.provider_model_info()}
+
+
+def continue_stream_with_tool_result_with_registry(
+    request: dict[str, Any],
+    registry: dict[str, Any],
+    *,
+    tool_call: dict[str, Any],
+    tool_result: dict[str, Any],
+    stream_context: dict[str, Any] | None = None,
+    model_id: str | None = None,
+    base_url: str | None = None,
+    api_key_env: str = "MODEL_API_KEY",
+    timeout: int = 120,
+) -> Iterator[dict[str, Any]]:
+    provider = provider_for_request(request, registry, model_id=model_id, base_url=base_url, api_key_env=api_key_env, timeout=timeout)
+    yield from provider.continue_stream_with_tool_result(request, tool_call, tool_result, stream_context)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--request", required=True)
@@ -99,16 +129,20 @@ def main() -> int:
     parser.add_argument("--api-key-env", default="MODEL_API_KEY")
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--stream", action="store_true")
+    parser.add_argument("--continuation-capability", action="store_true")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
     request = load_json(Path(args.request))
     registry = load_json(Path(args.instances))
     try:
-        result: Any = (
-            list(stream_generate_with_registry(request, registry, model_id=args.model_id, base_url=args.base_url, api_key_env=args.api_key_env, timeout=args.timeout))
-            if args.stream
-            else generate_with_registry(request, registry, model_id=args.model_id, base_url=args.base_url, api_key_env=args.api_key_env, timeout=args.timeout)
-        )
+        if args.continuation_capability:
+            result: Any = continuation_capability_with_registry(request, registry, model_id=args.model_id, base_url=args.base_url, api_key_env=args.api_key_env, timeout=args.timeout)
+        else:
+            result = (
+                list(stream_generate_with_registry(request, registry, model_id=args.model_id, base_url=args.base_url, api_key_env=args.api_key_env, timeout=args.timeout))
+                if args.stream
+                else generate_with_registry(request, registry, model_id=args.model_id, base_url=args.base_url, api_key_env=args.api_key_env, timeout=args.timeout)
+            )
     except ProviderError as exc:
         result = response_envelope(status="failed", request_id_value=request.get("request_id"), trace_id=request.get("trace_id"), error=exc.to_error(request.get("trace_id"), request.get("request_id")))
     text = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
@@ -117,7 +151,7 @@ def main() -> int:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(text, encoding="utf-8")
     print(text, end="")
-    status = result[-1].get("event_type") if isinstance(result, list) and result else result.get("status")
+    status = result[-1].get("event_type") if isinstance(result, list) and result else result.get("status", "ok")
     return 0 if status in {"ok", "provider_stream_completed"} else 1
 
 
