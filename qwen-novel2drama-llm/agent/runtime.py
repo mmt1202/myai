@@ -26,6 +26,7 @@ from skills.registry import SkillError, call_skill
 RUN_STATES = {"queued", "running", "waiting_tool", "waiting_approval", "completed", "failed", "cancelled"}
 TERMINAL_STATES = {"completed", "failed", "cancelled"}
 APPROVAL_POLICIES = {"never", "on_write", "on_cost", "always"}
+CANCEL_REQUEST_FILENAME = "cancel_requested.json"
 VALID_TRANSITIONS = {
     "queued": {"running", "cancelled"},
     "running": {"waiting_tool", "waiting_approval", "completed", "failed", "cancelled"},
@@ -54,6 +55,29 @@ def save_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def cancellation_request(output_dir: Path) -> dict[str, Any] | None:
+    path = output_dir / CANCEL_REQUEST_FILENAME
+    if not path.exists():
+        return None
+    try:
+        return load_json(path)
+    except Exception:  # noqa: BLE001
+        return {"reason": "cancel_requested", "source": str(path)}
+
+
+def apply_cancellation_if_requested(output_dir: Path, run: dict[str, Any], events: AgentEventWriter | None = None, *, checkpoint: str = "checkpoint") -> bool:
+    marker = cancellation_request(output_dir)
+    if not marker or run.get("status") in TERMINAL_STATES:
+        return False
+    step = add_step(run, "cancel_check", status="cancelled", input_data={"checkpoint": checkpoint}, output_data=marker, error=marker.get("reason"))
+    transition(run, "cancelled")
+    run["error"] = "cancelled"
+    run["cancelled"] = marker
+    if events:
+        events.emit("run_cancelled", status="cancelled", step=step, message=marker.get("reason") or "cancel_requested", data={"checkpoint": checkpoint, "cancel": marker})
+    return True
+
+
 def create_run(request: dict[str, Any]) -> dict[str, Any]:
     approval_policy = request.get("approval_policy") or "on_cost"
     if approval_policy not in APPROVAL_POLICIES:
@@ -65,6 +89,9 @@ def create_run(request: dict[str, Any]) -> dict[str, Any]:
         "owner_id": request.get("owner_id"),
         "project_id": request.get("project_id"),
         "workspace_id": request.get("workspace_id"),
+        "retry_of": request.get("retry_of"),
+        "resume_of": request.get("resume_of"),
+        "parent_run_id": request.get("parent_run_id"),
         "task": request.get("task") or "",
         "input": request.get("input") or [],
         "route_mode": request.get("route_mode") or "balanced",
@@ -332,6 +359,8 @@ def run_skill_loop(project_root: Path, output_dir: Path, run: dict[str, Any], re
     if events:
         events.emit("skill_loop_started", status="running", step=step, data={"skill_call_count": len(calls)})
     for raw_call in calls:
+        if apply_cancellation_if_requested(output_dir, run, events, checkpoint="skill_loop"):
+            return
         call = normalize_skill_call(raw_call)
         allow_provider = default_allow_provider or call["allow_provider"]
         allow_write = default_allow_write or call["allow_write"]
@@ -372,9 +401,13 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
     selected_model_id = route_decision.get("selected_model_id")
     if not selected_model_id:
         raise ProviderError("model_not_found", "selected model id is missing")
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="before_provider"):
+        raise ProviderError("cancelled", "agent run was cancelled")
     quota_report = check_workspace_quota_preflight(project_root, output_dir, run, request, route_decision)
     if events and quota_report:
         events.emit("workspace_quota_checked", status="completed", data={"workspace_id": quota_report.get("workspace_id"), "decision": quota_report.get("decision"), "violations": quota_report.get("violations") or []})
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="after_quota"):
+        raise ProviderError("cancelled", "agent run was cancelled")
     provider_request = build_provider_request(request, foundation_request, selected_model_id)
     use_stream = bool(request.get("stream_provider_tool_calls")) and bool(request.get("enable_model_tool_loop"))
     incremental_stream = use_stream and bool(request.get("incremental_stream_tool_execution"))
@@ -424,6 +457,8 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
 def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[str, Any], request: dict[str, Any], foundation_request: dict[str, Any], route_decision: dict[str, Any], instances: dict[str, Any], provider_response: dict[str, Any], events: AgentEventWriter | None = None) -> None:
     if not request.get("enable_model_tool_loop"):
         return
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="before_model_tool_loop"):
+        return
     selected_model_id = route_decision.get("selected_model_id")
     if not selected_model_id:
         return
@@ -464,9 +499,12 @@ def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[st
 def attach_artifacts(output_dir: Path, run: dict[str, Any]) -> None:
     run["artifacts"] = {
         "report": str(output_dir / "agent_run_report.json"),
+        "request": str(output_dir / "agent_request.json"),
         "events": str(output_dir / "events.jsonl"),
         "usage_ledger": str(output_dir / "usage_ledger.jsonl"),
     }
+    if (output_dir / CANCEL_REQUEST_FILENAME).exists():
+        run["artifacts"]["cancel_request"] = str(output_dir / CANCEL_REQUEST_FILENAME)
     if run.get("provider_response"):
         run["artifacts"]["provider_response"] = str(output_dir / "provider_response.json")
     if (output_dir / "provider_response_final.json").exists():
@@ -494,15 +532,27 @@ def finalize_events(output_dir: Path, run: dict[str, Any]) -> None:
     run["event_summary"] = summarize_agent_events(events)
 
 
+def finalize_run(output_dir: Path, run: dict[str, Any]) -> dict[str, Any]:
+    attach_artifacts(output_dir, run)
+    finalize_events(output_dir, run)
+    save_json(output_dir / "agent_run_report.json", run)
+    return run
+
+
 def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path, instances_path: Path | None = None, rules_path: Path | None = None) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    save_json(output_dir / "agent_request.json", request)
     run = create_run(request)
     events = AgentEventWriter(output_dir / "events.jsonl", run, enabled=not bool(request.get("disable_events")))
-    events.emit("run_created", status="queued", data={"task": run.get("task"), "route_mode": run.get("route_mode")})
+    events.emit("run_created", status="queued", data={"task": run.get("task"), "route_mode": run.get("route_mode"), "retry_of": run.get("retry_of"), "resume_of": run.get("resume_of")})
     save_json(output_dir / "agent_run_created.json", run)
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="created"):
+        return finalize_run(output_dir, run)
     transition(run, "running")
     step = add_step(run, "start", output_data={"status": "running"})
     events.emit("run_started", status="running", step=step)
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="started"):
+        return finalize_run(output_dir, run)
 
     foundation_request = build_foundation_request({**run, **request})
     instances = load_json(instances_path or project_root / "configs" / "model_instance_registry.json")
@@ -514,15 +564,14 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
         run["cost"] = (route_decision["selected"].get("estimated_cost") or {})
     step = add_step(run, "route_model", input_data=foundation_request, output_data=route_decision, status="completed" if route_decision.get("status") == "routed" else "failed")
     events.emit("route_completed" if route_decision.get("status") == "routed" else "route_failed", status=step["status"], step=step, data={"selected_model_id": route_decision.get("selected_model_id"), "route_status": route_decision.get("status")})
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="after_route"):
+        return finalize_run(output_dir, run)
 
     if route_decision.get("status") != "routed":
         run["error"] = "router_no_candidate"
         transition(run, "failed")
         events.emit("run_failed", status="failed", message="router_no_candidate", error="router_no_candidate")
-        attach_artifacts(output_dir, run)
-        finalize_events(output_dir, run)
-        save_json(output_dir / "agent_run_report.json", run)
-        return run
+        return finalize_run(output_dir, run)
 
     ruleset = load_rules(rules_path or project_root / "configs" / "rules" / "default_rules.yaml")
     rule_context = rule_context_from_route(foundation_request, route_decision, instances)
@@ -531,6 +580,8 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
     run["rule_decision"] = rule_decision
     step = add_step(run, "evaluate_rules", input_data=rule_context, output_data=rule_decision)
     events.emit("rules_completed", status="completed", step=step, data={"decision": rule_decision.get("decision"), "matched_rule_count": len(rule_decision.get("matched_rules") or [])})
+    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="after_rules"):
+        return finalize_run(output_dir, run)
 
     if rule_decision.get("decision") == "deny":
         run["error"] = "policy_denied"
@@ -545,6 +596,8 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
     else:
         try:
             run_skill_loop(project_root, output_dir, run, request, events)
+            if run.get("status") == "cancelled":
+                return finalize_run(output_dir, run)
         except SkillError as exc:
             run["error"] = "skill_failed"
             step = add_step(run, "skill_loop_error", status="failed", output_data={"message": str(exc)}, error=str(exc))
@@ -553,12 +606,17 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
             transition(run, "failed")
             events.emit("run_failed", status="failed", message="skill_failed", error=str(exc))
         else:
+            if apply_cancellation_if_requested(output_dir, run, events, checkpoint="before_provider_branch"):
+                return finalize_run(output_dir, run)
             if request.get("execute_provider"):
                 try:
                     provider_response = run_provider_step(project_root, output_dir, run, request, foundation_request, route_decision, instances, events)
+                    if apply_cancellation_if_requested(output_dir, run, events, checkpoint="after_provider"):
+                        return finalize_run(output_dir, run)
                     maybe_run_model_tool_loop(project_root, output_dir, run, request, foundation_request, route_decision, instances, provider_response, events)
-                    transition(run, "completed")
-                    events.emit("run_completed", status="completed", data={"usage": run.get("usage") or {}, "cost": run.get("cost") or {}})
+                    if run.get("status") != "cancelled":
+                        transition(run, "completed")
+                        events.emit("run_completed", status="completed", data={"usage": run.get("usage") or {}, "cost": run.get("cost") or {}})
                 except SkillError as exc:
                     run["error"] = "model_tool_loop_failed"
                     step = add_step(run, "model_tool_loop_error", status="failed", output_data={"message": str(exc)}, error=str(exc))
@@ -566,6 +624,8 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
                     transition(run, "failed")
                     events.emit("run_failed", status="failed", message="model_tool_loop_failed", error=str(exc))
                 except ProviderError as exc:
+                    if exc.code == "cancelled" and run.get("status") == "cancelled":
+                        return finalize_run(output_dir, run)
                     run["error"] = exc.code
                     step = add_step(run, "provider_error", status="failed", output_data={"code": exc.code, "message": exc.message, "details": exc.details}, error=exc.message)
                     events.emit("provider_failed", status="failed", step=step, error=exc.message, data={"code": exc.code, "details": exc.details})
@@ -575,13 +635,11 @@ def run_agent_once(project_root: Path, request: dict[str, Any], output_dir: Path
                 step = add_step(run, "ready_for_provider", output_data={"selected_model_id": route_decision.get("selected_model_id"), "provider_execution": "skipped"})
                 events.emit("provider_skipped", status="completed", step=step, data={"selected_model_id": route_decision.get("selected_model_id")})
                 record_usage(output_dir, run)
-                transition(run, "completed")
-                events.emit("run_completed", status="completed", data={"usage": run.get("usage") or {}, "cost": run.get("cost") or {}})
+                if not apply_cancellation_if_requested(output_dir, run, events, checkpoint="provider_skipped"):
+                    transition(run, "completed")
+                    events.emit("run_completed", status="completed", data={"usage": run.get("usage") or {}, "cost": run.get("cost") or {}})
 
-    attach_artifacts(output_dir, run)
-    finalize_events(output_dir, run)
-    save_json(output_dir / "agent_run_report.json", run)
-    return run
+    return finalize_run(output_dir, run)
 
 
 def main() -> int:
