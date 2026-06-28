@@ -152,7 +152,7 @@ def retry_run(
     request = restart_request(safe_id, original, action="retry", new_run_id=new_run_id, overrides=overrides)
     child_id = active_store.safe_run_id(request["run_id"])
     child_dir = active_store.run_dir(child_id)
-    run = run_agent_once(project_root, request, child_dir)
+    run = run_agent_once(project_root, request, child_dir, store=active_store)
     index_run_in_store(active_store, child_id, request, run)
     return {"action": "retry", "source_run_id": safe_id, "new_run_id": child_id, "run": run, "run_store": active_store.metadata()}
 
@@ -176,7 +176,7 @@ def resume_run(
     request = restart_request(safe_id, original, action="resume", new_run_id=new_run_id, overrides=overrides)
     child_id = active_store.safe_run_id(request["run_id"])
     child_dir = active_store.run_dir(child_id)
-    run = run_agent_once(project_root, request, child_dir)
+    run = run_agent_once(project_root, request, child_dir, store=active_store)
     index_run_in_store(active_store, child_id, request, run)
     return {"action": "resume", "source_run_id": safe_id, "new_run_id": child_id, "source_status": report.get("status"), "run": run, "run_store": active_store.metadata()}
 
