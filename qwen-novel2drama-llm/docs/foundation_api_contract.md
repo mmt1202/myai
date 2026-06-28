@@ -28,7 +28,7 @@ The foundation layer owns:
 - memory contract
 - rules contract
 - skills and MCP contract
-- agent run and event stream contract
+- agent run, lifecycle and event stream contract
 - provider adapter and provider stream contract
 - API key and workspace scope contract
 - auth audit and rate limit contract
@@ -106,6 +106,8 @@ Public endpoints:
 - `/docs`
 - `/openapi.json`
 
+Agent lifecycle endpoints use `agent:run` scope.
+
 Auth audit events are written to:
 
 ```text
@@ -119,51 +121,6 @@ FOUNDATION_RATE_LIMIT_ENABLED=true
 FOUNDATION_RATE_LIMITS=configs/auth/rate_limits.json
 FOUNDATION_RATE_LIMIT_STATE=outputs/auth/rate_limit_state.json
 ```
-
-Rate-limited responses use HTTP `429` and return:
-
-- `Retry-After`
-- `X-RateLimit-Limit`
-- `X-RateLimit-Remaining`
-- `X-RateLimit-Reset`
-
-## Model capabilities and instances
-
-Capabilities are abstract abilities. Model instances are deployable or external models.
-
-Capability registry:
-
-```text
-configs/model_capability_registry.json
-```
-
-Instance registry:
-
-```text
-configs/model_instance_registry.json
-```
-
-This split is required for routing, cost control, lifecycle management and provider replacement.
-
-## Routing modes
-
-Router config:
-
-```text
-configs/model_router.yaml
-```
-
-Initial route modes:
-
-- `smart`
-- `cheap`
-- `balanced`
-- `local_first`
-- `cloud_first`
-- `drama_specialist`
-- `code_specialist`
-
-The router must run hard policy filters before scoring.
 
 ## OpenAPI surface
 
@@ -191,8 +148,42 @@ Runtime-aligned endpoints:
 - `POST /v1/mcp/call`
 - `POST /v1/agent/run`
 - `GET /v1/agent/events`
+- `GET /v1/agent/status`
+- `POST /v1/agent/cancel`
+- `POST /v1/agent/retry`
+- `POST /v1/agent/resume`
 
 The earlier planned `/v1/jobs/{job_id}` endpoint is not in the current runtime and is intentionally not listed as implemented.
+
+## Agent lifecycle contract
+
+Agent lifecycle endpoints wrap `agent/lifecycle.py` file-backed controls:
+
+- `GET /v1/agent/status?run_id=...`
+- `POST /v1/agent/cancel`
+- `POST /v1/agent/retry`
+- `POST /v1/agent/resume`
+
+Lifecycle request schema:
+
+```text
+AgentLifecycleRequest
+```
+
+Lifecycle response output schema:
+
+```text
+AgentLifecycleResponse
+```
+
+Current behavior:
+
+- `status` reads `agent_run_report.json` and `events.jsonl`.
+- `cancel` writes `cancel_requested.json`.
+- `retry` replays `agent_request.json` as a child run with `retry_of`.
+- `resume` replays `agent_request.json` as a child run with `resume_of`.
+
+This is not a database run store or distributed queue.
 
 ## Provider execution and stream controls
 
@@ -214,89 +205,8 @@ Stream fields:
 - `stream_options`
 - `stream_provider_tool_calls`
 - `incremental_stream_tool_execution`
+- `same_stream_tool_result_injection`
 
 `/v1/chat` returns `text/event-stream` when `stream=true` and `execute_provider=true`.
 
 OpenAI-compatible provider streaming sends `stream=true` to `/chat/completions`, parses provider SSE `data: {...}` lines, stops on `data: [DONE]`, and converts text/tool-call deltas into `ProviderStreamEvent` chunks.
-
-Provider stream event types:
-
-- `provider_stream_started`
-- `provider_stream_delta`
-- `provider_stream_tool_call_delta`
-- `provider_stream_completed`
-- `provider_stream_failed`
-
-Streamed tool calls are reconstructed by `index` and returned under:
-
-```text
-provider_stream_completed.output.tool_calls
-```
-
-`stream_provider_tool_calls` makes Agent provider execution collect stream chunks, convert the completed stream into a provider response, and pass reconstructed tool calls into the existing model tool loop.
-
-`incremental_stream_tool_execution` lets Agent execute a streamed tool call before stream completion once `function.name` and JSON-decodable `function.arguments` are complete. The result is stored and reused by the final tool loop to avoid duplicate execution.
-
-The default is route/cost preflight only.
-
-## Agent run and event controls
-
-`/v1/agent/run` supports request-driven skill calls, model-decided tool calls, provider execution, streamed tool-call bridging, incremental stream tool execution and event artifacts.
-
-Request-driven skill calls use `skill_calls`.
-
-Skill permission fields:
-
-- `allow_provider`
-- `allow_write`
-- `approved`
-- `continue_on_error`
-
-Request-level skill defaults:
-
-- `allow_skill_provider`
-- `allow_skill_write`
-- `approve_skills`
-
-Model-decided tool loop fields:
-
-- `enable_model_tool_loop`
-- `stream_provider_tool_calls`
-- `incremental_stream_tool_execution`
-- `max_tool_rounds`
-- `allow_model_tool_provider`
-- `allow_model_tool_write`
-- `approve_model_tools`
-- `fail_on_model_tool_error`
-
-Event controls:
-
-- `disable_events`
-- `GET /v1/agent/events?run_id=<id>` for JSON events
-- `GET /v1/agent/events?run_id=<id>&stream=true` for Server-Sent Events
-- `since_event_id` for incremental reads
-- `limit` for bounded reads
-- `poll_interval` and `max_seconds` for SSE polling behavior
-
-Model-decided tool calls must use registered foundation skill ids as tool names. Tool outputs are appended as `tool_result` content blocks and passed back to the provider for the next round.
-
-## Short drama/comic specialty
-
-Short drama and comic capabilities are model capabilities, not the first application implementation.
-
-The foundation exposes specialty capabilities such as:
-
-- `drama.story_reasoning`
-- `drama.visual_planning`
-
-Applications can use these capabilities later through the same routing and API layer.
-
-## Next implementation step
-
-After incremental stream tool execution v1, continue with:
-
-1. provider usage reconciliation
-2. workspace-level budget and quota checks
-3. CI contract check
-4. distributed rate limiting backend
-5. Agent resume/cancel/retry
