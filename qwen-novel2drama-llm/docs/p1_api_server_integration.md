@@ -1,6 +1,6 @@
 # P1 API Server Integration
 
-The FastAPI server now exposes foundation services through `/v1/*` routes while preserving the old `/generate` local model endpoint.
+The FastAPI server exposes foundation services through `/v1/*` routes while preserving the old `/generate` local model endpoint.
 
 Implemented files:
 
@@ -21,7 +21,7 @@ Start only foundation APIs without loading local model weights:
 python inference/api_server.py --skip-model-load
 ```
 
-The second mode is useful for routing, token/cost, memory, rules, skills, MCP and agent API testing.
+The second mode is useful for routing, token/cost, memory, rules, skills, MCP, Agent runtime, Agent lifecycle and provider API testing.
 
 ## Auth, audit and rate limit mode
 
@@ -50,24 +50,6 @@ Auth audit events are written to:
 outputs/auth/auth_audit.jsonl
 ```
 
-Enable rate limiting:
-
-```bash
-FOUNDATION_RATE_LIMIT_ENABLED=true \
-FOUNDATION_RATE_LIMITS=configs/auth/rate_limits.json \
-FOUNDATION_RATE_LIMIT_STATE=outputs/auth/rate_limit_state.json \
-python inference/api_server.py --skip-model-load
-```
-
-Rate-limited responses return HTTP `429` with:
-
-```text
-Retry-After
-X-RateLimit-Limit
-X-RateLimit-Remaining
-X-RateLimit-Reset
-```
-
 ## Foundation endpoints
 
 Runtime endpoints:
@@ -88,6 +70,10 @@ Runtime endpoints:
 - `POST /v1/mcp/call`
 - `POST /v1/agent/run`
 - `GET /v1/agent/events`
+- `GET /v1/agent/status`
+- `POST /v1/agent/cancel`
+- `POST /v1/agent/retry`
+- `POST /v1/agent/resume`
 
 The legacy `POST /generate` endpoint remains and still requires a loaded local model.
 
@@ -122,99 +108,22 @@ To stream provider output as SSE:
 
 For OpenAI-compatible providers, the adapter sends native `stream=true` to `/chat/completions`, parses provider SSE `data: {...}` lines, stops on `data: [DONE]`, and converts text/tool-call deltas into foundation `ProviderStreamEvent` chunks.
 
-To ask compatible providers for final stream usage when they support it:
-
-```json
-{
-  "stream": true,
-  "stream_include_usage": true
-}
-```
-
-SSE provider frames use:
-
-```text
-id: <chunk_id>
-event: provider_stream_delta
-data: <provider stream event JSON>
-```
-
-Provider stream event types:
+Provider stream event types include:
 
 - `provider_stream_started`
 - `provider_stream_delta`
 - `provider_stream_tool_call_delta`
+- `provider_stream_tool_result`
+- `provider_stream_continuation_unsupported`
+- `provider_stream_continuation_failed`
 - `provider_stream_completed`
 - `provider_stream_failed`
 
-When the remote stream contains `delta.tool_calls`, the provider adapter reconstructs complete tool calls by `index` and returns them in:
-
-```text
-provider_stream_completed.output.tool_calls
-```
-
 `/v1/chat` does not execute reconstructed tool calls. Agent execution can bridge them when `stream_provider_tool_calls` is enabled.
-
-## Local provider execution
-
-The local model instance `local.qwen2_5_1_5b_instruct` uses `providers/local_text.py` through the provider factory.
-
-Local provider dry-run does not load model weights:
-
-```json
-{
-  "route_mode": "local_first",
-  "execute_provider": true,
-  "dry_run_provider": true,
-  "input": [{"type": "text", "text": "hello"}]
-}
-```
-
-Local provider stream dry-run:
-
-```json
-{
-  "route_mode": "local_first",
-  "execute_provider": true,
-  "stream": true,
-  "dry_run_provider": true,
-  "stream_chunk_chars": 32,
-  "input": [{"type": "text", "text": "hello"}]
-}
-```
-
-Real local execution needs a model path:
-
-```bash
-FOUNDATION_LOCAL_MODEL_PATH=/path/to/model python inference/api_server.py --skip-model-load
-```
-
-or a request field:
-
-```json
-{
-  "execute_provider": true,
-  "model_path": "/path/to/model",
-  "use_cache": true,
-  "serialize_generation": true,
-  "stream": true,
-  "input": [{"type": "text", "text": "hello"}]
-}
-```
-
-Local provider cache and concurrency controls:
-
-- `use_cache`: reuse loaded model runtime in the current process.
-- `disable_cache`: request-level opt-out.
-- `serialize_generation`: serialize generation per cached model runtime.
-- `stream_chunk_chars`: chunk size for fallback chunked streaming.
-- `force_chunked_stream`: force full-generation chunk fallback even when native streaming exists.
-- `providers.local_text.cache_stats()`: inspect process-local cache state.
-- `providers.local_text.clear_model_cache()`: clear process-local cache state.
 
 ## Agent provider execution, tool loops and live events
 
-`/v1/agent/run` supports provider execution, request-defined skill calls, model-decided tool calls, stream tool-call bridging, incremental stream tool execution and run events through `agent/runtime.py`.
+`/v1/agent/run` supports provider execution, request-defined skill calls, model-decided tool calls, stream tool-call bridging, incremental stream tool execution, workspace quota and run events through `agent/runtime.py`.
 
 Provider preflight only:
 
@@ -224,54 +133,6 @@ Provider preflight only:
   "task": "summarize this",
   "route_mode": "smart",
   "approval_policy": "never"
-}
-```
-
-Provider dry-run execution:
-
-```json
-{
-  "run_id": "demo-run",
-  "task": "summarize this",
-  "route_mode": "smart",
-  "approval_policy": "never",
-  "execute_provider": true,
-  "dry_run_provider": true,
-  "base_url": "http://localhost:8000/v1"
-}
-```
-
-Request-driven skill loop execution:
-
-```json
-{
-  "task": "count tokens before running",
-  "route_mode": "balanced",
-  "approval_policy": "never",
-  "skill_calls": [
-    {
-      "name": "foundation.token_count",
-      "arguments": {
-        "request": {"input": [{"type": "text", "text": "hello"}]},
-        "expected_output_tokens": 10
-      }
-    }
-  ]
-}
-```
-
-Model-decided tool loop execution:
-
-```json
-{
-  "task": "use tools if needed",
-  "route_mode": "smart",
-  "approval_policy": "never",
-  "execute_provider": true,
-  "enable_model_tool_loop": true,
-  "max_tool_rounds": 3,
-  "allow_model_tool_write": false,
-  "approve_model_tools": false
 }
 ```
 
@@ -288,8 +149,6 @@ Streamed provider tool-call bridge:
   "stream_include_usage": true
 }
 ```
-
-When the bridge is enabled, Agent writes `provider_stream_chunks.jsonl`, converts the final stream completion into a normal provider response, then executes reconstructed `output.tool_calls` through the existing model tool loop. Follow-up provider rounds can also be streamed and written to `model_tool_loop_stream_round_<n>.jsonl`.
 
 Incremental stream tool execution:
 
@@ -325,22 +184,79 @@ Stream events as SSE:
 GET /v1/agent/events?run_id=demo-run&stream=true
 ```
 
+## Agent lifecycle APIs
+
+The API server exposes file-backed lifecycle controls from `agent/lifecycle.py`.
+
+Status:
+
+```text
+GET /v1/agent/status?run_id=demo-run
+```
+
+Cancel:
+
+```json
+POST /v1/agent/cancel
+{
+  "run_id": "demo-run",
+  "reason": "user_requested",
+  "requested_by": "operator"
+}
+```
+
+Retry:
+
+```json
+POST /v1/agent/retry
+{
+  "run_id": "demo-run",
+  "new_run_id": "demo-run-retry",
+  "overrides": {
+    "task": "retry with revised prompt"
+  }
+}
+```
+
+Resume:
+
+```json
+POST /v1/agent/resume
+{
+  "run_id": "demo-run",
+  "new_run_id": "demo-run-resume",
+  "overrides": {
+    "skill_calls": []
+  },
+  "allow_completed": false
+}
+```
+
+All lifecycle endpoints use `agent:run` auth scope.
+
+Current lifecycle behavior:
+
+- `status` reads `agent_run_report.json` and `events.jsonl`.
+- `cancel` writes `cancel_requested.json` and updates non-terminal reports to `cancelled`.
+- `retry` loads `agent_request.json`, merges overrides, and creates a child run with `retry_of`.
+- `resume` loads `agent_request.json`, merges overrides, and creates a child run with `resume_of`.
+
 ## Current limitations
 
 - Agent SSE currently polls the JSONL event file.
+- Lifecycle APIs are file-backed and do not use a database run store.
+- Cancel is cooperative and does not forcibly terminate an in-flight provider call.
+- Retry/resume are replay-based child runs, not arbitrary stack-frame continuation.
 - `/v1/chat` provider streaming is SSE only, not WebSocket.
-- Incremental stream execution does not inject tool results back into the same open provider stream.
+- Same-stream tool result injection is still provider capability gated; built-in providers currently fall back.
 - Model-decided tool loop is synchronous.
-- Tool names must map to registered foundation skill ids.
 - Local provider is text-only and loads weights in-process.
-- Local provider cache is process-local.
 - Auth is API-key based, not full OAuth/OIDC.
-- Rate limit state is file based, not distributed.
-- No database-backed memory or run store yet.
+- Rate limit and workspace quota state are file based, not distributed.
 
 ## Next steps
 
-- Add same-stream tool result injection or provider-supported bidirectional tool continuation.
-- Add workspace-level budget and quota checks.
-- Add distributed rate limiting backend.
-- Add resume/cancel/retry for Agent runs.
+- Add database run store for Agent lifecycle.
+- Add distributed quota/rate limit backend.
+- Add provider-native bidirectional continuation adapter.
+- Add secret-gated real provider smoke tests.
