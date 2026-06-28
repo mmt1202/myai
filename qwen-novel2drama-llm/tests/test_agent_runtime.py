@@ -133,6 +133,29 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertEqual(run["provider_response"]["stream"]["completed"], True)
             self.assertIn("provider_stream_chunks", run["artifacts"])
 
+    def test_run_agent_incremental_stream_tool_execution_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
+            run = run_agent_once(
+                project_root=PROJECT_ROOT,
+                request={
+                    "task": "incremental stream tool execution dry run",
+                    "route_mode": "smart",
+                    "approval_policy": "never",
+                    "execute_provider": True,
+                    "dry_run_provider": True,
+                    "enable_model_tool_loop": True,
+                    "stream_provider_tool_calls": True,
+                    "incremental_stream_tool_execution": True,
+                    "base_url": "http://example.test/v1",
+                },
+                output_dir=Path(tmpdir),
+            )
+            self.assertEqual(run["status"], "completed")
+            self.assertTrue((Path(tmpdir) / "provider_stream_chunks.jsonl").exists())
+            self.assertTrue((Path(tmpdir) / "incremental_tool_results.json").exists())
+            self.assertIn("incremental_tool_results", run["artifacts"])
+            self.assertEqual(run["provider_response"]["stream"]["incremental_tool_result_count"], 0)
+
     def test_run_agent_executes_safe_skill_loop(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
             run = run_agent_once(
