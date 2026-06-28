@@ -4,7 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from providers.factory import generate_with_registry, stream_generate_with_registry
+from providers.base import ProviderError, provider_stream_event
+from providers.factory import (
+    continuation_capability_with_registry,
+    continue_stream_with_tool_result_with_registry,
+    generate_with_registry,
+    stream_generate_with_registry,
+)
 from services.model_tool_loop_usage import aggregate_model_tool_loop_usage, apply_aggregation_to_provider_response
 from skills.registry import SkillError, call_skill
 
@@ -212,6 +218,89 @@ def maybe_execute_incremental_tool_call(
     }
 
 
+def tool_result_stream_event(request: dict[str, Any], selected_model_id: str, incremental_result: dict[str, Any], *, same_stream_requested: bool, continuation_capability: dict[str, Any] | None) -> dict[str, Any]:
+    return provider_stream_event(
+        "provider_stream_tool_result",
+        request_id_value=request.get("request_id"),
+        trace_id=request.get("trace_id"),
+        model={"model_id": selected_model_id},
+        output={"tool_call": incremental_result.get("tool_call"), "tool_result": incremental_result.get("result")},
+        metadata={
+            "same_stream_tool_result_injection_requested": same_stream_requested,
+            "continuation_capability": continuation_capability or {},
+            "source_chunk_id": incremental_result.get("source_chunk_id"),
+        },
+    )
+
+
+def continuation_unsupported_event(request: dict[str, Any], selected_model_id: str, incremental_result: dict[str, Any], continuation_capability: dict[str, Any] | None) -> dict[str, Any]:
+    return provider_stream_event(
+        "provider_stream_continuation_unsupported",
+        request_id_value=request.get("request_id"),
+        trace_id=request.get("trace_id"),
+        model={"model_id": selected_model_id},
+        output={"tool_call": incremental_result.get("tool_call"), "tool_result": incremental_result.get("result")},
+        metadata={
+            "fallback": "next_provider_request",
+            "continuation_capability": continuation_capability or {},
+        },
+    )
+
+
+def continuation_failed_event(request: dict[str, Any], selected_model_id: str, incremental_result: dict[str, Any], error: dict[str, Any]) -> dict[str, Any]:
+    return provider_stream_event(
+        "provider_stream_continuation_failed",
+        request_id_value=request.get("request_id"),
+        trace_id=request.get("trace_id"),
+        model={"model_id": selected_model_id},
+        output={"tool_call": incremental_result.get("tool_call"), "tool_result": incremental_result.get("result")},
+        error=error,
+        metadata={"fallback": "next_provider_request"},
+    )
+
+
+def maybe_continue_same_stream(
+    *,
+    request: dict[str, Any],
+    instances: dict[str, Any],
+    selected_model_id: str,
+    incremental_result: dict[str, Any],
+    continuation_capability: dict[str, Any] | None,
+    base_url: str | None,
+    api_key_env: str,
+) -> list[dict[str, Any]]:
+    if not (continuation_capability or {}).get("supported"):
+        return [continuation_unsupported_event(request, selected_model_id, incremental_result, continuation_capability)]
+    try:
+        return list(
+            continue_stream_with_tool_result_with_registry(
+                request,
+                instances,
+                tool_call=incremental_result.get("tool_call") or {},
+                tool_result=incremental_result.get("result") or {},
+                stream_context={"source_chunk_id": incremental_result.get("source_chunk_id"), "continuation_capability": continuation_capability},
+                model_id=selected_model_id,
+                base_url=base_url,
+                api_key_env=api_key_env,
+            )
+        )
+    except ProviderError as exc:
+        return [continuation_failed_event(request, selected_model_id, incremental_result, exc.to_error(request.get("trace_id"), request.get("request_id")))]
+
+
+def stream_metadata(chunks: list[dict[str, Any]], *, same_stream_requested: bool, continuation_capability: dict[str, Any] | None) -> dict[str, Any]:
+    event_types = [item.get("event_type") for item in chunks]
+    return {
+        "same_stream_tool_result_injection_requested": same_stream_requested,
+        "same_stream_tool_result_injection_supported": bool((continuation_capability or {}).get("supported")),
+        "continuation_capability": continuation_capability or {},
+        "tool_result_event_count": event_types.count("provider_stream_tool_result"),
+        "continuation_unsupported_count": event_types.count("provider_stream_continuation_unsupported"),
+        "continuation_failed_count": event_types.count("provider_stream_continuation_failed"),
+        "continuation_event_count": sum(1 for item in event_types if str(item or "").startswith("provider_stream_continuation_")),
+    }
+
+
 def generate_provider_round(
     request: dict[str, Any],
     instances: dict[str, Any],
@@ -227,6 +316,7 @@ def generate_provider_round(
     allow_provider: bool = False,
     allow_write: bool = False,
     approved: bool = False,
+    same_stream_tool_result_injection: bool = False,
 ) -> dict[str, Any]:
     if not stream:
         return generate_with_registry(
@@ -240,6 +330,9 @@ def generate_provider_round(
     chunks: list[dict[str, Any]] = []
     incremental_results: list[dict[str, Any]] = []
     executed_tool_call_ids: set[str] = set()
+    continuation_capability: dict[str, Any] | None = None
+    if same_stream_tool_result_injection:
+        continuation_capability = continuation_capability_with_registry(stream_request, instances, model_id=selected_model_id, base_url=base_url, api_key_env=api_key_env)
     for chunk in stream_generate_with_registry(
         stream_request,
         instances,
@@ -259,12 +352,26 @@ def generate_provider_round(
             )
             if result:
                 incremental_results.append(result)
+                chunks.append(tool_result_stream_event(stream_request, selected_model_id, result, same_stream_requested=same_stream_tool_result_injection, continuation_capability=continuation_capability))
+                if same_stream_tool_result_injection:
+                    chunks.extend(
+                        maybe_continue_same_stream(
+                            request=stream_request,
+                            instances=instances,
+                            selected_model_id=selected_model_id,
+                            incremental_result=result,
+                            continuation_capability=continuation_capability,
+                            base_url=base_url,
+                            api_key_env=api_key_env,
+                        )
+                    )
     if stream_chunks_path:
         save_jsonl(stream_chunks_path, chunks)
     if incremental_tool_results_path:
         save_json(incremental_tool_results_path, {"results": incremental_results})
     response = provider_response_from_stream_chunks(chunks)
     response["stream_chunks_path"] = str(stream_chunks_path) if stream_chunks_path else None
+    response.setdefault("stream", {}).update(stream_metadata(chunks, same_stream_requested=same_stream_tool_result_injection, continuation_capability=continuation_capability))
     if incremental_results:
         response["incremental_tool_results"] = incremental_results
         response["incremental_tool_results_path"] = str(incremental_tool_results_path) if incremental_tool_results_path else None
@@ -316,6 +423,7 @@ def run_model_tool_loop(
     fail_on_tool_error = bool(request.get("fail_on_model_tool_error", True))
     use_stream = bool(request.get("stream_provider_tool_calls"))
     incremental_stream = bool(request.get("incremental_stream_tool_execution"))
+    same_stream_tool_result_injection = bool(request.get("same_stream_tool_result_injection"))
     current_response = initial_provider_response
     current_request = {**foundation_request, "model_id": selected_model_id, "model": selected_model_id}
     rounds: list[dict[str, Any]] = []
@@ -346,6 +454,7 @@ def run_model_tool_loop(
                     "initial_provider_response": initial_provider_response,
                     "stream_provider_tool_calls": use_stream,
                     "incremental_stream_tool_execution": incremental_stream,
+                    "same_stream_tool_result_injection": same_stream_tool_result_injection,
                 }
                 return finalize_model_tool_loop_summary(
                     output_dir=output_dir,
@@ -372,6 +481,7 @@ def run_model_tool_loop(
             allow_provider=allow_provider,
             allow_write=allow_write,
             approved=approved,
+            same_stream_tool_result_injection=same_stream_tool_result_injection,
         )
         rounds.append(
             {
@@ -391,6 +501,7 @@ def run_model_tool_loop(
         "final_provider_response": current_response,
         "stream_provider_tool_calls": use_stream,
         "incremental_stream_tool_execution": incremental_stream,
+        "same_stream_tool_result_injection": same_stream_tool_result_injection,
     }
     return finalize_model_tool_loop_summary(
         output_dir=output_dir,
