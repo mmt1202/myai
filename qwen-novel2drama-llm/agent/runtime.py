@@ -8,10 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from agent.events import AgentEventWriter, read_agent_events, summarize_agent_events
-from agent.tool_loop import run_model_tool_loop
+from agent.tool_loop import generate_provider_round, run_model_tool_loop
 from inference.model_router import route_model
 from providers.base import ProviderError
-from providers.factory import generate_with_registry
 from services.rule_engine import evaluate_rules, load_rules
 from services.usage_ledger import write_event
 from skills.registry import SkillError, call_skill
@@ -184,6 +183,8 @@ def build_provider_request(request: dict[str, Any], foundation_request: dict[str
     provider_request["use_cache"] = request.get("use_cache")
     provider_request["disable_cache"] = request.get("disable_cache")
     provider_request["serialize_generation"] = request.get("serialize_generation")
+    provider_request["stream_include_usage"] = request.get("stream_include_usage")
+    provider_request["stream_options"] = request.get("stream_options")
     return provider_request
 
 
@@ -274,14 +275,17 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
     if not selected_model_id:
         raise ProviderError("model_not_found", "selected model id is missing")
     provider_request = build_provider_request(request, foundation_request, selected_model_id)
+    use_stream = bool(request.get("stream_provider_tool_calls")) and bool(request.get("enable_model_tool_loop"))
     if events:
-        events.emit("provider_started", status="running", data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run")})
-    response = generate_with_registry(
+        events.emit("provider_started", status="running", data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run"), "stream_provider_tool_calls": use_stream})
+    response = generate_provider_round(
         provider_request,
         instances,
-        model_id=selected_model_id,
+        selected_model_id=selected_model_id,
         base_url=request.get("base_url"),
         api_key_env=request.get("api_key_env") or "MODEL_API_KEY",
+        stream=use_stream,
+        stream_chunks_path=output_dir / "provider_stream_chunks.jsonl" if use_stream else None,
     )
     run["provider_response"] = response
     if response.get("usage"):
@@ -290,13 +294,13 @@ def run_provider_step(project_root: Path, output_dir: Path, run: dict[str, Any],
         run["cost"] = response["cost"]
     save_json(output_dir / "provider_response.json", response)
     record_usage(output_dir, run, provider_response=response)
-    step = add_step(run, "provider_generate", input_data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run")}, output_data=response, status="completed" if response.get("status") == "ok" else "failed")
+    step = add_step(run, "provider_generate", input_data={"model_id": selected_model_id, "dry_run": provider_request.get("dry_run"), "stream_provider_tool_calls": use_stream}, output_data=response, status="completed" if response.get("status") == "ok" else "failed")
     if response.get("status") != "ok":
         if events:
             events.emit("provider_failed", status="failed", step=step, data={"model_id": selected_model_id}, error="provider response was not ok")
         raise ProviderError("provider_error", "provider response was not ok", details=response)
     if events:
-        events.emit("provider_completed", status="completed", step=step, data={"model_id": selected_model_id, "usage": response.get("usage") or {}, "cost": response.get("cost") or {}})
+        events.emit("provider_completed", status="completed", step=step, data={"model_id": selected_model_id, "usage": response.get("usage") or {}, "cost": response.get("cost") or {}, "stream": response.get("stream") or {}})
     return response
 
 
@@ -308,7 +312,7 @@ def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[st
         return
     max_rounds = int(request.get("max_tool_rounds") or 3)
     if events:
-        events.emit("model_tool_loop_started", status="running", data={"model_id": selected_model_id, "max_rounds": max_rounds})
+        events.emit("model_tool_loop_started", status="running", data={"model_id": selected_model_id, "max_rounds": max_rounds, "stream_provider_tool_calls": bool(request.get("stream_provider_tool_calls"))})
     summary = run_model_tool_loop(
         project_root=project_root,
         output_dir=output_dir,
@@ -326,13 +330,13 @@ def maybe_run_model_tool_loop(project_root: Path, output_dir: Path, run: dict[st
         run["usage"] = run["provider_response"]["usage"]
     if (run.get("provider_response") or {}).get("cost"):
         run["cost"] = run["provider_response"]["cost"]
-    step = add_step(run, "model_tool_loop", status="completed" if summary.get("status") == "ok" else "failed", output_data={"status": summary.get("status"), "round_count": summary.get("round_count", len(summary.get("rounds", []))), "error": summary.get("error")})
+    step = add_step(run, "model_tool_loop", status="completed" if summary.get("status") == "ok" else "failed", output_data={"status": summary.get("status"), "round_count": summary.get("round_count", len(summary.get("rounds", []))), "error": summary.get("error"), "stream_provider_tool_calls": summary.get("stream_provider_tool_calls")})
     if summary.get("status") != "ok":
         if events:
             events.emit("model_tool_loop_failed", status="failed", step=step, data={"round_count": summary.get("round_count", len(summary.get("rounds", [])))}, error=str(summary.get("error") or "model tool loop failed"))
         raise SkillError(str(summary.get("error") or "model tool loop failed"))
     if events:
-        events.emit("model_tool_loop_completed", status="completed", step=step, data={"round_count": summary.get("round_count", len(summary.get("rounds", [])))})
+        events.emit("model_tool_loop_completed", status="completed", step=step, data={"round_count": summary.get("round_count", len(summary.get("rounds", []))), "stream_provider_tool_calls": summary.get("stream_provider_tool_calls")})
 
 
 def attach_artifacts(output_dir: Path, run: dict[str, Any]) -> None:
@@ -343,6 +347,8 @@ def attach_artifacts(output_dir: Path, run: dict[str, Any]) -> None:
     }
     if run.get("provider_response"):
         run["artifacts"]["provider_response"] = str(output_dir / "provider_response.json")
+    if (run.get("provider_response") or {}).get("stream_chunks_path"):
+        run["artifacts"]["provider_stream_chunks"] = str((run.get("provider_response") or {}).get("stream_chunks_path"))
     if run.get("skill_results"):
         run["artifacts"]["skill_results"] = str(output_dir / "skill_results.json")
     if run.get("model_tool_loop"):
@@ -455,6 +461,8 @@ def main() -> int:
     parser.add_argument("--dry-run-provider", action="store_true")
     parser.add_argument("--enable-model-tool-loop", action="store_true")
     parser.add_argument("--max-tool-rounds", type=int, default=None)
+    parser.add_argument("--stream-provider-tool-calls", action="store_true")
+    parser.add_argument("--stream-include-usage", action="store_true")
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--api-key-env", default="MODEL_API_KEY")
     parser.add_argument("--allow-skill-provider", action="store_true")
@@ -475,6 +483,10 @@ def main() -> int:
         request["enable_model_tool_loop"] = True
     if args.max_tool_rounds is not None:
         request["max_tool_rounds"] = args.max_tool_rounds
+    if args.stream_provider_tool_calls:
+        request["stream_provider_tool_calls"] = True
+    if args.stream_include_usage:
+        request["stream_include_usage"] = True
     if args.base_url:
         request["base_url"] = args.base_url
     if args.api_key_env:
@@ -493,15 +505,9 @@ def main() -> int:
         request["approve_model_tools"] = True
     if args.disable_events:
         request["disable_events"] = True
-    run = run_agent_once(
-        project_root=project_root,
-        request=request,
-        output_dir=project_root / args.output_dir,
-        instances_path=Path(args.instances) if args.instances else None,
-        rules_path=Path(args.rules) if args.rules else None,
-    )
+    run = run_agent_once(project_root, request, Path(args.output_dir), Path(args.instances) if args.instances else None, Path(args.rules) if args.rules else None)
     print(json.dumps(run, ensure_ascii=False, indent=2))
-    return 0 if run.get("status") not in {"failed", "cancelled"} else 1
+    return 0 if run.get("status") == "completed" else 1
 
 
 if __name__ == "__main__":
