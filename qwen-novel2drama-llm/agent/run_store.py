@@ -76,6 +76,10 @@ class RunStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def save_artifact(self, run_id: str, name: str, artifact: dict[str, Any], *, path: str | None = None) -> Path:
+        raise NotImplementedError
+
+    @abstractmethod
     def status(self, run_id: str) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -149,6 +153,11 @@ class FileRunStore(RunStore):
 
     def cancel_requested(self, run_id: str) -> bool:
         return self.artifact_path(run_id, CANCEL_REQUEST_FILENAME).exists()
+
+    def save_artifact(self, run_id: str, name: str, artifact: dict[str, Any], *, path: str | None = None) -> Path:
+        if path:
+            return self.artifact_path(run_id, name)
+        return self.save_json(self.artifact_path(run_id, name), artifact)
 
     def status(self, run_id: str) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
