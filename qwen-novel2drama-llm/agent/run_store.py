@@ -13,6 +13,7 @@ REQUEST_FILENAME = "agent_request.json"
 REPORT_FILENAME = "agent_run_report.json"
 EVENTS_FILENAME = "events.jsonl"
 RUN_CREATED_FILENAME = "agent_run_created.json"
+DEFAULT_SQLITE_RUN_DB = "runs.sqlite"
 
 
 class RunStoreError(RuntimeError):
@@ -76,6 +77,10 @@ class RunStore(ABC):
 
     @abstractmethod
     def status(self, run_id: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def metadata(self) -> dict[str, Any]:
         raise NotImplementedError
 
 
@@ -176,3 +181,30 @@ def marker_for_cancel(run_id: str, *, reason: str | None = None, requested_by: s
 
 def file_run_store(output_root: Path) -> FileRunStore:
     return FileRunStore(output_root)
+
+
+def default_sqlite_path(output_root: Path) -> Path:
+    return Path(output_root) / DEFAULT_SQLITE_RUN_DB
+
+
+def normalize_run_store_kind(kind: str | None) -> str:
+    value = str(kind or "file").strip().lower().replace("_", "-")
+    aliases = {
+        "": "file",
+        "file-backed": "file",
+        "file-run-store": "file",
+        "sqlite3": "sqlite",
+        "sqlite-run-store": "sqlite",
+    }
+    return aliases.get(value, value)
+
+
+def build_run_store(kind: str | None, output_root: Path, *, sqlite_path: Path | str | None = None) -> RunStore:
+    normalized = normalize_run_store_kind(kind)
+    if normalized == "file":
+        return file_run_store(output_root)
+    if normalized == "sqlite":
+        from agent.sqlite_run_store import sqlite_run_store
+
+        return sqlite_run_store(Path(sqlite_path) if sqlite_path else default_sqlite_path(output_root))
+    raise ValueError(f"unsupported run store: {kind}")
