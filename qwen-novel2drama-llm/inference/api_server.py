@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import importlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -23,7 +24,8 @@ from model_version_registry import resolve_model_paths
 from pydantic import BaseModel, Field
 
 from agent.events import read_agent_events, summarize_agent_events
-from agent.lifecycle import cancel_run, resume_run, retry_run, status_run
+from agent.lifecycle import cancel_run, index_run_in_store, resume_run, retry_run, status_run
+from agent.run_store import RunStore, build_run_store, default_sqlite_path
 from agent.runtime import run_agent_once
 from inference.model_router import route_model
 from mcp.adapter import FoundationMCPAdapter
@@ -121,12 +123,31 @@ def safe_run_id(value: str | None) -> str:
     return run_id
 
 
+def agent_run_store_kind() -> str:
+    return os.environ.get("FOUNDATION_AGENT_RUN_STORE", "file")
+
+
+def agent_run_store_db_path() -> Path:
+    configured = os.environ.get("FOUNDATION_AGENT_RUN_DB")
+    return Path(configured) if configured else default_sqlite_path(AGENT_OUTPUT_DIR)
+
+
+def agent_run_store() -> RunStore:
+    return build_run_store(agent_run_store_kind(), AGENT_OUTPUT_DIR, sqlite_path=agent_run_store_db_path())
+
+
+def agent_run_id_from_body(body: dict[str, Any]) -> str:
+    return safe_run_id(request_id(body) or body.get("run_id") or "latest")
+
+
 def agent_output_dir_for(body: dict[str, Any]) -> Path:
-    return AGENT_OUTPUT_DIR / safe_run_id(request_id(body) or body.get("run_id") or "latest")
+    store = agent_run_store()
+    return store.run_dir(agent_run_id_from_body(body))
 
 
 def agent_events_path(run_id: str | None) -> Path:
-    return AGENT_OUTPUT_DIR / safe_run_id(run_id) / "events.jsonl"
+    store = agent_run_store()
+    return store.artifact_path(safe_run_id(run_id), "events.jsonl")
 
 
 def events_after(events: list[dict[str, Any]], since_event_id: str | None = None) -> list[dict[str, Any]]:
@@ -300,7 +321,7 @@ def foundation_health() -> dict[str, Any]:
         "service": "myai-foundation",
         "model_version": ACTIVE_MODEL_VERSION,
         "model_path": ACTIVE_MODEL_PATH,
-        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "provider", "provider_stream", "auth", "rate_limit", "audit"],
+        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "agent_run_store", "provider", "provider_stream", "auth", "rate_limit", "audit"],
     }
 
 
@@ -406,8 +427,12 @@ def mcp_call_api(body: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/v1/agent/run")
 def agent_run_api(body: dict[str, Any]) -> dict[str, Any]:
-    run = run_agent_once(PROJECT_ROOT, body, agent_output_dir_for(body))
-    return ok(body, {"run": run}, usage=run.get("usage"), cost=run.get("cost"), route=run.get("route_decision"))
+    store = agent_run_store()
+    run_id_value = agent_run_id_from_body(body)
+    request_body = {**body, "run_id": body.get("run_id") or run_id_value}
+    run = run_agent_once(PROJECT_ROOT, request_body, store.run_dir(run_id_value))
+    index_run_in_store(store, run_id_value, request_body, run)
+    return ok(request_body, {"run": run}, usage=run.get("usage"), cost=run.get("cost"), route=run.get("route_decision"))
 
 
 @app.get("/v1/agent/events")
@@ -432,7 +457,7 @@ def agent_status_api(run_id: str = "latest") -> dict[str, Any]:
     safe_id = safe_run_id(run_id)
     body = {"request_id": safe_id, "run_id": safe_id}
     try:
-        result = status_run(AGENT_OUTPUT_DIR, safe_id)
+        result = status_run(AGENT_OUTPUT_DIR, safe_id, store=agent_run_store())
         return ok(body, result)
     except FileNotFoundError as exc:
         return failed(body, "agent_run_not_found", str(exc))
@@ -450,6 +475,7 @@ def agent_cancel_api(body: dict[str, Any]) -> dict[str, Any]:
             run_id_value,
             reason=body.get("reason"),
             requested_by=body.get("requested_by") or body.get("owner_id"),
+            store=agent_run_store(),
         )
         return ok(request_body, result)
     except ValueError as exc:
@@ -467,6 +493,7 @@ def agent_retry_api(body: dict[str, Any]) -> dict[str, Any]:
             run_id=run_id_value,
             new_run_id=body.get("new_run_id"),
             overrides=body.get("overrides") or {},
+            store=agent_run_store(),
         )
         child = result.get("run") or {}
         return ok(request_body, result, usage=child.get("usage"), cost=child.get("cost"), route=child.get("route_decision"))
@@ -488,6 +515,7 @@ def agent_resume_api(body: dict[str, Any]) -> dict[str, Any]:
             new_run_id=body.get("new_run_id"),
             overrides=body.get("overrides") or {},
             allow_completed=bool(body.get("allow_completed")),
+            store=agent_run_store(),
         )
         child = result.get("run") or {}
         return ok(request_body, result, usage=child.get("usage"), cost=child.get("cost"), route=child.get("route_decision"))
