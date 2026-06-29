@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import sqlite3
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from agent.events import normalize_event, summarize_agent_events
-from agent.run_store import RunNotFoundError, RunStore, paginate_run_summaries, run_summary_from_report, run_summary_matches_filters
+from agent.run_store import RunNotFoundError, RunStore, lease_is_expired, paginate_run_summaries, run_summary_from_report, run_summary_matches_filters, utc_now, worker_lease_marker
 from agent.runtime import now_iso
 
 
@@ -33,6 +34,7 @@ class SQLiteRunStore(RunStore):
                 CREATE TABLE IF NOT EXISTS run_events (run_id TEXT NOT NULL, event_id TEXT NOT NULL, event_type TEXT, status TEXT, created_at TEXT NOT NULL, event_json TEXT NOT NULL, PRIMARY KEY(run_id, event_id), FOREIGN KEY(run_id) REFERENCES runs(run_id) ON DELETE CASCADE);
                 CREATE TABLE IF NOT EXISTS cancel_requests (run_id TEXT PRIMARY KEY, marker_json TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(run_id) REFERENCES runs(run_id) ON DELETE CASCADE);
                 CREATE TABLE IF NOT EXISTS run_artifacts (run_id TEXT NOT NULL, name TEXT NOT NULL, path TEXT, artifact_json TEXT NOT NULL, PRIMARY KEY(run_id, name), FOREIGN KEY(run_id) REFERENCES runs(run_id) ON DELETE CASCADE);
+                CREATE TABLE IF NOT EXISTS run_leases (run_id TEXT PRIMARY KEY, worker_id TEXT NOT NULL, lease_json TEXT NOT NULL, lease_expires_at TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY(run_id) REFERENCES runs(run_id) ON DELETE CASCADE);
             """)
 
     def safe_run_id(self, run_id: str) -> str:
@@ -175,6 +177,77 @@ class SQLiteRunStore(RunStore):
         page = paginate_run_summaries(summaries, limit=limit, offset=offset, order=order)
         return {**page, "run_store": self.metadata(), "filters": {"status": status, "owner_id": owner_id, "project_id": project_id, "workspace_id": workspace_id, "parent_run_id": parent_run_id, "query": query}}
 
+    def load_worker_lease(self, run_id: str) -> dict[str, Any] | None:
+        safe_id = self.safe_run_id(run_id)
+        with self._connect() as conn:
+            row = conn.execute("SELECT lease_json FROM run_leases WHERE run_id = ?", (safe_id,)).fetchone()
+            return json.loads(row["lease_json"]) if row else None
+
+    def _save_lease(self, conn: sqlite3.Connection, run_id: str, lease: dict[str, Any]) -> None:
+        conn.execute("INSERT INTO run_leases(run_id, worker_id, lease_json, lease_expires_at, status, updated_at) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(run_id) DO UPDATE SET worker_id=excluded.worker_id, lease_json=excluded.lease_json, lease_expires_at=excluded.lease_expires_at, status=excluded.status, updated_at=excluded.updated_at", (run_id, lease.get("worker_id"), json.dumps(deepcopy(lease), ensure_ascii=False, sort_keys=True), lease.get("lease_expires_at"), lease.get("status") or "claimed", lease.get("renewed_at") or now_iso()))
+
+    def claim_run(self, run_id: str, worker_id: str, *, lease_seconds: int = 60, now: datetime | None = None) -> dict[str, Any]:
+        safe_id = self.safe_run_id(run_id)
+        current = now or utc_now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._require_run(conn, safe_id)
+            row = conn.execute("SELECT lease_json FROM run_leases WHERE run_id = ?", (safe_id,)).fetchone()
+            existing = json.loads(row["lease_json"]) if row else None
+            if existing and existing.get("status") == "claimed" and not lease_is_expired(existing, at=current) and existing.get("worker_id") != worker_id:
+                return {"claimed": False, "run_id": safe_id, "worker_id": worker_id, "active_lease": existing, "reason": "already_claimed", "run_store": self.metadata()}
+            lease = worker_lease_marker(safe_id, worker_id, lease_seconds=lease_seconds, at=current)
+            if existing and existing.get("worker_id") == worker_id:
+                lease["claimed_at"] = existing.get("claimed_at") or lease["claimed_at"]
+            self._save_lease(conn, safe_id, lease)
+            return {"claimed": True, "run_id": safe_id, "worker_id": worker_id, "lease": lease, "run_store": self.metadata()}
+
+    def renew_lease(self, run_id: str, worker_id: str, *, lease_seconds: int = 60, now: datetime | None = None) -> dict[str, Any]:
+        safe_id = self.safe_run_id(run_id)
+        current = now or utc_now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._require_run(conn, safe_id)
+            row = conn.execute("SELECT lease_json FROM run_leases WHERE run_id = ?", (safe_id,)).fetchone()
+            existing = json.loads(row["lease_json"]) if row else None
+            if not existing or existing.get("status") != "claimed":
+                return {"renewed": False, "run_id": safe_id, "worker_id": worker_id, "reason": "no_active_lease", "run_store": self.metadata()}
+            if existing.get("worker_id") != worker_id:
+                return {"renewed": False, "run_id": safe_id, "worker_id": worker_id, "active_lease": existing, "reason": "worker_mismatch", "run_store": self.metadata()}
+            if lease_is_expired(existing, at=current):
+                return {"renewed": False, "run_id": safe_id, "worker_id": worker_id, "active_lease": existing, "reason": "lease_expired", "run_store": self.metadata()}
+            lease = worker_lease_marker(safe_id, worker_id, lease_seconds=lease_seconds, at=current)
+            lease["claimed_at"] = existing.get("claimed_at") or lease["claimed_at"]
+            self._save_lease(conn, safe_id, lease)
+            return {"renewed": True, "run_id": safe_id, "worker_id": worker_id, "lease": lease, "run_store": self.metadata()}
+
+    def release_run(self, run_id: str, worker_id: str, *, now: datetime | None = None) -> dict[str, Any]:
+        safe_id = self.safe_run_id(run_id)
+        current = now or utc_now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._require_run(conn, safe_id)
+            row = conn.execute("SELECT lease_json FROM run_leases WHERE run_id = ?", (safe_id,)).fetchone()
+            existing = json.loads(row["lease_json"]) if row else None
+            if not existing or existing.get("status") != "claimed":
+                return {"released": False, "run_id": safe_id, "worker_id": worker_id, "reason": "no_active_lease", "run_store": self.metadata()}
+            if existing.get("worker_id") != worker_id:
+                return {"released": False, "run_id": safe_id, "worker_id": worker_id, "active_lease": existing, "reason": "worker_mismatch", "run_store": self.metadata()}
+            released = {**existing, "status": "released", "released_at": current.isoformat()}
+            self._save_lease(conn, safe_id, released)
+            return {"released": True, "run_id": safe_id, "worker_id": worker_id, "lease": released, "run_store": self.metadata()}
+
+    def find_expired_leases(self, *, now: datetime | None = None) -> list[dict[str, Any]]:
+        current = now or utc_now()
+        with self._connect() as conn:
+            rows = conn.execute("SELECT lease_json FROM run_leases WHERE status = 'claimed' ORDER BY lease_expires_at").fetchall()
+        expired: list[dict[str, Any]] = []
+        for row in rows:
+            lease = json.loads(row["lease_json"])
+            if lease_is_expired(lease, at=current):
+                expired.append({**lease, "run_store": self.metadata()})
+        return expired
+
     def status(self, run_id: str) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
         with self._connect() as conn:
@@ -185,7 +258,7 @@ class SQLiteRunStore(RunStore):
         except RunNotFoundError:
             report = {}
         artifacts = report.get("artifacts") or {r["name"]: r["path"] or json.loads(r["artifact_json"]) for r in artifact_rows}
-        return {"run_id": safe_id, "status": report.get("status") or row["status"], "error": report.get("error") or row["error"], "created_at": report.get("created_at") or row["created_at"], "updated_at": report.get("updated_at") or row["updated_at"], "completed_at": report.get("completed_at") or row["completed_at"], "cancel_requested": self.cancel_requested(safe_id), "artifacts": artifacts, "event_summary": self.event_summary(safe_id), "run_store": self.metadata()}
+        return {"run_id": safe_id, "status": report.get("status") or row["status"], "error": report.get("error") or row["error"], "created_at": report.get("created_at") or row["created_at"], "updated_at": report.get("updated_at") or row["updated_at"], "completed_at": report.get("completed_at") or row["completed_at"], "cancel_requested": self.cancel_requested(safe_id), "worker_lease": self.load_worker_lease(safe_id), "artifacts": artifacts, "event_summary": self.event_summary(safe_id), "run_store": self.metadata()}
 
     def metadata(self) -> dict[str, Any]:
         return {"type": "sqlite", "db_path": str(self.db_path)}
