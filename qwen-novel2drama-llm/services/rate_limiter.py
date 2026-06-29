@@ -7,15 +7,19 @@ import time
 from pathlib import Path
 from typing import Any
 
+from services.quota_store import QuotaStore, quota_store_from_env
+
 
 class RateLimitError(RuntimeError):
-    def __init__(self, message: str, *, retry_after_seconds: int, limit: int, remaining: int, reset_at: int) -> None:
+    def __init__(self, message: str, *, retry_after_seconds: int, limit: int, remaining: int, reset_at: int, bucket: str | None = None, quota_store: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.message = message
         self.retry_after_seconds = retry_after_seconds
         self.limit = limit
         self.remaining = remaining
         self.reset_at = reset_at
+        self.bucket = bucket
+        self.quota_store = quota_store or {}
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -24,6 +28,8 @@ class RateLimitError(RuntimeError):
             "limit": self.limit,
             "remaining": self.remaining,
             "reset_at": self.reset_at,
+            "bucket": self.bucket,
+            "quota_store": self.quota_store,
         }
 
 
@@ -81,43 +87,35 @@ def check_rate_limit(
     required_scope: str | None,
     workspace_id: str | None = None,
     now: int | None = None,
+    store: QuotaStore | None = None,
 ) -> dict[str, Any]:
     policy = resolve_limit(config, key_id=key_id, required_scope=required_scope)
     current_time = int(now if now is not None else time.time())
     if not policy["enabled"] or policy["limit"] <= 0:
-        return {"allowed": True, "limit": 0, "remaining": -1, "reset_at": current_time, "retry_after_seconds": 0, "bucket": None}
-    state = load_json(state_path, {"buckets": {}})
-    buckets = state.setdefault("buckets", {})
+        return {"allowed": True, "limit": 0, "remaining": -1, "reset_at": current_time, "retry_after_seconds": 0, "bucket": None, "quota_store": None}
+    selected_store = store or quota_store_from_env(rate_limit_state_path=state_path, workspace_quota_state_path=state_path.with_name("workspace_quota_state.json"))
     key = bucket_key(key_id, required_scope, workspace_id)
-    bucket = buckets.get(key) or {"count": 0, "window_start": current_time}
-    window_start = int(bucket.get("window_start") or current_time)
-    if current_time - window_start >= policy["window_seconds"]:
-        bucket = {"count": 0, "window_start": current_time}
-        window_start = current_time
-    count = int(bucket.get("count") or 0)
-    reset_at = window_start + policy["window_seconds"]
-    if count >= policy["limit"]:
-        save_json(state_path, state)
+    result = selected_store.check_rate_limit_bucket(bucket=key, limit=policy["limit"], window_seconds=policy["window_seconds"], now=current_time)
+    output = {
+        "allowed": bool(result.get("allowed")),
+        "limit": int(result.get("limit") or policy["limit"]),
+        "remaining": int(result.get("remaining") or 0),
+        "reset_at": int(result.get("reset_at") or current_time),
+        "retry_after_seconds": int(result.get("retry_after_seconds") or 0),
+        "bucket": result.get("bucket") or key,
+        "quota_store": result.get("run_store") or (selected_store.metadata() if hasattr(selected_store, "metadata") else {}),
+    }
+    if not output["allowed"]:
         raise RateLimitError(
             "rate limit exceeded",
-            retry_after_seconds=max(1, reset_at - current_time),
-            limit=policy["limit"],
+            retry_after_seconds=max(1, output["retry_after_seconds"]),
+            limit=output["limit"],
             remaining=0,
-            reset_at=reset_at,
+            reset_at=output["reset_at"],
+            bucket=output["bucket"],
+            quota_store=output["quota_store"],
         )
-    count += 1
-    bucket["count"] = count
-    bucket["window_start"] = window_start
-    buckets[key] = bucket
-    save_json(state_path, state)
-    return {
-        "allowed": True,
-        "limit": policy["limit"],
-        "remaining": max(0, policy["limit"] - count),
-        "reset_at": reset_at,
-        "retry_after_seconds": 0,
-        "bucket": key,
-    }
+    return output
 
 
 def main() -> int:
