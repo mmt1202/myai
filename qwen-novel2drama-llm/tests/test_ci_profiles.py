@@ -15,7 +15,7 @@ class CIProfilesTests(unittest.TestCase):
         self.assertEqual(profile_names_for("default"), ["contracts", "core"])
 
     def test_optional_group_contains_non_heavy_profiles(self) -> None:
-        self.assertEqual(profile_names_for("optional"), ["provider-adapter", "api-server", "postgres-run-store", "local-provider-contract"])
+        self.assertEqual(profile_names_for("optional"), ["provider-adapter", "provider-smoke", "api-server", "postgres-run-store", "postgres-quota", "local-provider-contract"])
 
     def test_core_profile_is_dependency_free_and_default_on_push(self) -> None:
         profile = PROFILES["core"]
@@ -40,6 +40,12 @@ class CIProfilesTests(unittest.TestCase):
         self.assertEqual(profile.requirements, ("requirements/postgres-run-store.txt",))
         self.assertEqual(install_command(profile), "python -m pip install -r requirements/postgres-run-store.txt")
         self.assertEqual(unittest_command(profile), "python -m unittest tests.test_postgres_run_store_contract")
+
+    def test_postgres_quota_profile_has_optional_requirements(self) -> None:
+        profile = PROFILES["postgres-quota"]
+        self.assertEqual(profile.requirements, ("requirements/postgres-quota.txt",))
+        self.assertEqual(install_command(profile), "python -m pip install -r requirements/postgres-quota.txt")
+        self.assertEqual(unittest_command(profile), "python -m unittest tests.test_postgres_quota_store")
 
     def test_local_model_imports_is_heavyweight_import_only(self) -> None:
         profile = PROFILES["local-model-imports"]

@@ -27,7 +27,7 @@ def save_json(path: Path, data: Any) -> None:
 def quota_backend_from_env() -> str:
     value = os.environ.get("FOUNDATION_QUOTA_BACKEND") or os.environ.get("FOUNDATION_RATE_LIMIT_BACKEND") or os.environ.get("FOUNDATION_WORKSPACE_QUOTA_BACKEND") or "file"
     normalized = value.strip().lower().replace("_", "-")
-    aliases = {"json": "file", "file-backed": "file", "sqlite3": "sqlite", "sqlite-backed": "sqlite"}
+    aliases = {"json": "file", "file-backed": "file", "sqlite3": "sqlite", "sqlite-backed": "sqlite", "postgresql": "postgres", "pg": "postgres"}
     return aliases.get(normalized, normalized)
 
 
@@ -213,19 +213,23 @@ def sqlite_quota_store(db_path: Path | str) -> SQLiteQuotaStore:
     return SQLiteQuotaStore(db_path)
 
 
-def build_quota_store(kind: str | None, *, rate_limit_state_path: Path, workspace_quota_state_path: Path, sqlite_path: Path | str | None = None) -> QuotaStore:
+def build_quota_store(kind: str | None, *, rate_limit_state_path: Path, workspace_quota_state_path: Path, sqlite_path: Path | str | None = None, postgres_dsn: str | None = None) -> QuotaStore:
     normalized = (kind or "file").strip().lower().replace("_", "-")
-    aliases = {"json": "file", "file-backed": "file", "sqlite3": "sqlite", "sqlite-backed": "sqlite"}
+    aliases = {"json": "file", "file-backed": "file", "sqlite3": "sqlite", "sqlite-backed": "sqlite", "postgresql": "postgres", "pg": "postgres"}
     normalized = aliases.get(normalized, normalized)
     if normalized == "file":
         return file_quota_store(rate_limit_state_path=rate_limit_state_path, workspace_quota_state_path=workspace_quota_state_path)
     if normalized == "sqlite":
         default_db = workspace_quota_state_path.with_suffix(".sqlite")
         return sqlite_quota_store(Path(sqlite_path) if sqlite_path else default_db)
+    if normalized == "postgres":
+        from services.postgres_quota_store import PostgresQuotaStore
+
+        return PostgresQuotaStore(postgres_dsn)
     raise ValueError(f"unsupported quota store: {kind}")
 
 
 def quota_store_from_env(*, rate_limit_state_path: Path, workspace_quota_state_path: Path) -> QuotaStore:
     backend = quota_backend_from_env()
     default_db = workspace_quota_state_path.with_suffix(".sqlite")
-    return build_quota_store(backend, rate_limit_state_path=rate_limit_state_path, workspace_quota_state_path=workspace_quota_state_path, sqlite_path=quota_db_path_from_env(default_db))
+    return build_quota_store(backend, rate_limit_state_path=rate_limit_state_path, workspace_quota_state_path=workspace_quota_state_path, sqlite_path=quota_db_path_from_env(default_db), postgres_dsn=os.environ.get("FOUNDATION_QUOTA_POSTGRES_DSN"))

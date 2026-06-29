@@ -10,6 +10,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from services.postgres_quota_store import PostgresQuotaStore
 from services.quota_store import FileQuotaStore, SQLiteQuotaStore, build_quota_store, quota_store_from_env
 from services.rate_limiter import RateLimitError, check_rate_limit
 from services.workspace_quota import check_workspace_quota_from_paths, record_workspace_usage_to_path
@@ -24,6 +25,14 @@ class QuotaStoreTests(unittest.TestCase):
             self.assertIsInstance(file_store, FileQuotaStore)
             self.assertIsInstance(sqlite_store, SQLiteQuotaStore)
             self.assertEqual(sqlite_store.metadata()["db_path"], str(root / "quota.sqlite"))
+
+    def test_build_quota_store_selects_postgres_without_connecting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            store = build_quota_store("postgres", rate_limit_state_path=root / "rate.json", workspace_quota_state_path=root / "quota.json", postgres_dsn="configured")
+            self.assertIsInstance(store, PostgresQuotaStore)
+            self.assertEqual(store.metadata()["type"], "postgres")
+            self.assertTrue(store.metadata()["dsn_configured"])
 
     def test_file_store_rate_limit_bucket(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

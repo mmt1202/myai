@@ -55,14 +55,15 @@ FOUNDATION_WORKSPACE_QUOTA_STATE=outputs/auth/workspace_quota_state.json
 Quota backend selection:
 
 ```text
-FOUNDATION_QUOTA_BACKEND=file|sqlite
+FOUNDATION_QUOTA_BACKEND=file|sqlite|postgres
 FOUNDATION_QUOTA_DB=outputs/auth/quota.sqlite
+FOUNDATION_QUOTA_POSTGRES_DSN=postgresql://user:pass@localhost:5432/foundation
 ```
 
 Compatibility aliases:
 
 ```text
-FOUNDATION_WORKSPACE_QUOTA_BACKEND=file|sqlite
+FOUNDATION_WORKSPACE_QUOTA_BACKEND=file|sqlite|postgres
 FOUNDATION_WORKSPACE_QUOTA_DB=outputs/auth/quota.sqlite
 ```
 
@@ -109,18 +110,21 @@ Workspace overrides deep-merge with default limits.
 Implemented backends:
 
 ```text
-FileQuotaStore
-SQLiteQuotaStore
+FileQuotaStore      -> JSON files, default local backend
+SQLiteQuotaStore    -> local SQLite persistence
+PostgresQuotaStore  -> optional Postgres persistence v1
 ```
+
+Backend selection is unified as `file|sqlite|postgres`; aliases include `json` for file, `sqlite3` for SQLite, and `postgresql`/`pg` for Postgres. `FOUNDATION_QUOTA_BACKEND` is preferred, with compatibility fallbacks to `FOUNDATION_RATE_LIMIT_BACKEND` and `FOUNDATION_WORKSPACE_QUOTA_BACKEND`.
 
 Factory helpers:
 
 ```python
-build_quota_store(kind, rate_limit_state_path=..., workspace_quota_state_path=..., sqlite_path=...)
+build_quota_store(kind, rate_limit_state_path=..., workspace_quota_state_path=..., sqlite_path=..., postgres_dsn=...)
 quota_store_from_env(rate_limit_state_path=..., workspace_quota_state_path=...)
 ```
 
-SQLite tables:
+SQLite/Postgres tables:
 
 ```text
 rate_limit_buckets
@@ -178,7 +182,7 @@ workspace_quota_check.json
 workspace_quota_usage.json
 ```
 
-The quota backend stores daily/monthly counters and recent event metadata. In file mode, these remain in JSON state. In SQLite mode, counters go into `workspace_usage` and events go into `workspace_quota_events`.
+The quota backend stores daily/monthly counters and recent event metadata. In file mode, these remain in JSON state. In SQLite and Postgres modes, counters go into `workspace_usage` and events go into `workspace_quota_events`.
 
 ## CLI
 
@@ -239,6 +243,13 @@ python agent/runtime.py \
 
 ## Next steps
 
-- Add Postgres/distributed quota backend.
 - Add API middleware-level quota checks for selected scopes.
 - Add workspace budget dashboards and rollups.
+
+## Postgres quota backend v1
+
+T013 adds an optional Postgres-backed `QuotaStore` implementation for environments that need quota state outside local files or SQLite. Select it with `FOUNDATION_QUOTA_BACKEND=postgres` (aliases: `postgresql`, `pg`) and provide `FOUNDATION_QUOTA_POSTGRES_DSN`. The schema lives in `migrations/postgres_quota_store.sql` and persists three contract surfaces: rate-limit buckets, workspace usage counters, and workspace quota events.
+
+The dependency profile is intentionally optional (`requirements/postgres-quota.txt`) so core CI does not connect to or require a real Postgres service. Real database tests are DSN-gated by `FOUNDATION_QUOTA_POSTGRES_DSN` and skip when the DSN is absent.
+
+Boundary: this backend is persistence v1 for quota decisions. It is not complete billing, not a globally strongly-consistent distributed rate limiter, and not a production-grade billing system.
