@@ -78,6 +78,29 @@ class SQLiteRunStoreTests(unittest.TestCase):
             store.save_artifact("demo", "usage.json", {"tokens": 3})
             self.assertEqual(store.status("demo")["artifacts"], {"usage.json": {"tokens": 3}})
 
+    def test_list_runs_filters_orders_and_paginates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = sqlite_run_store(Path(tmpdir) / "runs.sqlite3")
+            store.save_report("a", {"run_id": "a", "status": "completed", "task": "alpha task", "workspace_id": "w1", "owner_id": "u1", "updated_at": "2026-01-02T00:00:00+00:00", "artifacts": {}})
+            store.save_report("b", {"run_id": "b", "status": "failed", "task": "beta task", "workspace_id": "w2", "owner_id": "u1", "updated_at": "2026-01-03T00:00:00+00:00", "artifacts": {}})
+            store.save_report("c", {"run_id": "c", "status": "completed", "task": "gamma task", "workspace_id": "w1", "owner_id": "u2", "updated_at": "2026-01-01T00:00:00+00:00", "artifacts": {}})
+
+            all_runs = store.list_runs()
+            self.assertEqual(all_runs["total"], 3)
+            self.assertEqual([item["run_id"] for item in all_runs["runs"]], ["b", "a", "c"])
+
+            filtered = store.list_runs(status="completed", workspace_id="w1", order="asc")
+            self.assertEqual([item["run_id"] for item in filtered["runs"]], ["c", "a"])
+
+            queried = store.list_runs(query="beta")
+            self.assertEqual(queried["total"], 1)
+            self.assertEqual(queried["runs"][0]["run_id"], "b")
+
+            page = store.list_runs(limit=1, offset=1)
+            self.assertEqual(page["limit"], 1)
+            self.assertEqual(page["offset"], 1)
+            self.assertEqual(len(page["runs"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
