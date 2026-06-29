@@ -1,6 +1,14 @@
 -- Postgres Agent Run Store schema v1.
 -- This migration mirrors the RunStore contract used by FileRunStore and SQLiteRunStore.
 
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    migration_id TEXT PRIMARY KEY,
+    checksum TEXT NOT NULL,
+    statement_count INTEGER NOT NULL,
+    applied_at TEXT NOT NULL,
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY,
     status TEXT,
