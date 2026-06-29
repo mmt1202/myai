@@ -27,6 +27,7 @@ class CIProfilesTests(unittest.TestCase):
         self.assertIn("tests.test_run_store", command)
         self.assertIn("tests.test_sqlite_run_store", command)
         self.assertIn("tests.test_agent_lifecycle", command)
+        self.assertIn("tests.test_worker_dispatcher", command)
         self.assertIn("tests.test_quota_store", command)
 
     def test_api_server_profile_has_api_requirements(self) -> None:
