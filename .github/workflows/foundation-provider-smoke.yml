@@ -1,0 +1,27 @@
+name: Foundation Provider Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provider-smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qwen-novel2drama-llm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Show profile
+        run: python scripts/ci_profiles.py --profile provider-smoke
+      - name: Install profile
+        run: python -m pip install -r requirements/provider-smoke.txt
+      - name: Run config tests
+        run: python -m unittest tests.test_provider_smoke_config
+      - name: Dry-run smoke runner
+        run: python scripts/provider_smoke_test.py --dry-run --json
