@@ -1,0 +1,8 @@
+{
+  "suite": "agent",
+  "cases": [
+    {"case_id": "agent_run", "task": "agent", "request": {"actual": {"status": "completed", "events": true}}, "expected": {"status": "completed", "events": true}},
+    {"case_id": "agent_queue", "task": "agent", "request": {"actual": {"queued": true, "retry": true}}, "expected": {"queued": true, "retry": true}},
+    {"case_id": "agent_report", "task": "agent", "request": {"actual": {"has_usage": true, "has_route": true}}, "expected": {"has_usage": true, "has_route": true}}
+  ]
+}
