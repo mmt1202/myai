@@ -15,6 +15,12 @@
 - Postgres migration runner/history。
 - provider continuation、provider smoke、local/openai-compatible provider contracts。
 - API quota、health/readiness、queue observability、deployment profile、secret resolver、metrics、backup plan、preflight、TLS template。
+- `configs/model_versions.json`：active model version 已注册，不再为空。
+- `docs/FOUNDATION_API_CONTRACT.md`：Foundation API 契约已固定。
+- `docs/FOUNDATION_BOUNDARY.md`：Foundation 与 ForgePilot 职责边界已固定。
+- `scripts/run_checks.py`：核心目录 compile、skills validate、MCP validate、router smoke 已纳入检查。
+- `docs/FOUNDATION_RELEASE_CHECKLIST.md`：稳定发布检查清单已补齐。
+- `docs/MEMORY_ROADMAP.md`：Memory JSONL 当前边界与 SQLite/vector 后续路线已记录。
 
 ### P2 Foundation
 
@@ -40,6 +46,7 @@
 - `providers/media_generation.py`：图片/视频生成任务提交、任务轮询、资产记录写入的通用 HTTP provider client。
 - `drama/media_assets.py`：角色定妆图任务和分镜视频任务提交编排。
 - `drama/generation_api.py`：图片/视频生成 API handlers。
+- `drama/skills.py` 与 `configs/skills/foundation_skills.json`：短剧核心 skills 已 active。
 
 ## 已完成标记
 
@@ -47,6 +54,12 @@
 P0_contracts_implemented_v1 = true
 P1_foundation_runtime_implemented_v1 = true
 P1_hardening_implemented_v1 = true
+P1_model_versions_registry_implemented_v1 = true
+P1_foundation_api_contract_documented_v1 = true
+P1_foundation_boundary_documented_v1 = true
+P1_run_checks_core_coverage_implemented_v1 = true
+P1_foundation_release_checklist_implemented_v1 = true
+P1_memory_roadmap_documented_v1 = true
 P2_foundation_capabilities_implemented_v1 = true
 P3_novel_parsing_implemented_v1 = true
 P3_novel_to_drama_outline_implemented_v1 = true
@@ -58,6 +71,7 @@ P3_short_drama_workflow_api_implemented_v1 = true
 P3_direct_image_generation_adapter_implemented_v1 = true
 P3_direct_video_generation_adapter_implemented_v1 = true
 P3_media_generation_asset_tracking_implemented_v1 = true
+P3_drama_skills_active_implemented_v1 = true
 runtime_services_completed = partially
 implementation_completed = false
 ```
@@ -72,11 +86,14 @@ implementation_completed = false
 6. 外部 MQ / 跨区域调度。
 7. 真实 billing invoice import/export integrations。
 8. 平台专属媒体生成网关、资产托管、审核流、人工复核工作台。
+9. SQLite/vector memory backend 实现。
+10. 大规模 golden dataset 与质量门禁。
 
 ## 禁止误判
 
 - 直接图片/视频生成 adapter 完成，不等于具体第三方平台账号、端点、额度和平台侧参数已经配置。
 - P3 pipeline 完成，不等于已经生成最终成片。
 - Media generation job client 完成，不等于资产 CDN、版权检查、审核流和人工复核系统完成。
+- Foundation 边界文档完成，不等于 ForgePilot 已经开发完成。
 - Repository-level hardening 完成，不等于已经部署到某个云平台生产环境。
 - 训练 runbook 不等于模型已经训练完成。
