@@ -7,6 +7,7 @@ Implemented files:
 - `inference/api_server.py`
 - `agent/run_store.py`
 - `agent/sqlite_run_store.py`
+- `agent/postgres_run_store.py`
 - `agent/events.py`
 - `tests/test_api_server_foundation.py`
 
@@ -131,7 +132,7 @@ Stream events as SSE:
 GET /v1/agent/events?run_id=demo-run&stream=true
 ```
 
-Both JSON and SSE event APIs read from the selected run store. In file mode this means JSONL; in SQLite mode this means DB-backed `run_events`.
+Both JSON and SSE event APIs read from the selected run store. In file mode this means JSONL; in SQLite mode this means DB-backed `run_events`. Postgres mode is scaffold-only and will return explicit run store errors for runtime operations until the real implementation is added.
 
 ## Agent lifecycle APIs and run store
 
@@ -143,7 +144,8 @@ Lifecycle functions use the `agent/run_store.py` boundary:
 RunStore
 FileRunStore
 SQLiteRunStore
-build_run_store(kind, output_root, sqlite_path=None)
+PostgresRunStore scaffold
+build_run_store(kind, output_root, sqlite_path=None, postgres_dsn=None)
 ```
 
 The default API server store is file-backed under:
@@ -160,13 +162,23 @@ FOUNDATION_AGENT_RUN_DB=outputs/agent_runtime/runs.sqlite \
 python inference/api_server.py --skip-model-load
 ```
 
+Postgres scaffold selection:
+
+```bash
+FOUNDATION_AGENT_RUN_STORE=postgres \
+FOUNDATION_AGENT_RUN_POSTGRES_DSN=postgresql://user:pass@localhost:5432/myai \
+python inference/api_server.py --skip-model-load
+```
+
+The Postgres mode above is a selectable scaffold only. Runtime reads/writes intentionally raise explicit unavailable errors until the real Postgres implementation is added.
+
 Supported values:
 
 ```text
-FOUNDATION_AGENT_RUN_STORE=file|sqlite
+FOUNDATION_AGENT_RUN_STORE=file|sqlite|postgres
 ```
 
-When `/v1/agent/run` completes, runtime writes request/report/artifact index into the selected run store while retaining file artifacts for compatibility.
+When `/v1/agent/run` completes, runtime writes request/report/artifact index into the selected run store while retaining file artifacts for compatibility. This works for file/SQLite today; Postgres remains scaffold-only.
 
 List runs:
 
@@ -248,8 +260,8 @@ Current lifecycle behavior:
 - SSE is polling-based, not WebSocket or push-based infrastructure.
 - File-backed run listing scans local directories and is not for high-volume production search.
 - SQLite is local-only and not a distributed run store.
-- No Postgres run store yet.
-- No transaction, lock, lease or distributed concurrency control yet.
+- Postgres run store is scaffold-only and not production persistence yet.
+- Worker leases are cooperative and local-store based, not a full worker queue.
 - Cancel is cooperative and does not forcibly terminate an in-flight provider call.
 - Retry/resume are replay-based child runs, not arbitrary stack-frame continuation.
 - `/v1/chat` provider streaming is SSE only, not WebSocket.
@@ -257,11 +269,4 @@ Current lifecycle behavior:
 - Model-decided tool loop is synchronous.
 - Local provider is text-only and loads weights in-process.
 - Auth is API-key based, not full OAuth/OIDC.
-- Rate limit and workspace quota state are file based, not distributed.
-
-## Next steps
-
-- Add Postgres run store implementation.
-- Add distributed quota/rate limit backend.
-- Add provider-native bidirectional continuation adapter.
-- Add secret-gated real provider smoke tests.
+- Rate limit and workspace quota state are file/SQLite based, not distributed.
