@@ -29,7 +29,7 @@ Txxx: <short English summary>
 ```bash
 python scripts/check_openapi_contract.py
 python -m unittest tests.test_openapi_contract_check tests.test_foundation_contracts
-python -m unittest tests.test_foundation_core_services tests.test_memory_store tests.test_rule_engine tests.test_auth_service tests.test_auth_audit_rate_limit tests.test_usage_reconciliation tests.test_model_tool_loop_usage tests.test_provider_continuation tests.test_run_store tests.test_sqlite_run_store tests.test_agent_events tests.test_ci_profiles tests.test_workspace_quota tests.test_skill_registry tests.test_mcp_adapter
+python -m unittest tests.test_foundation_core_services tests.test_memory_store tests.test_rule_engine tests.test_auth_service tests.test_auth_audit_rate_limit tests.test_usage_reconciliation tests.test_model_tool_loop_usage tests.test_provider_continuation tests.test_run_store tests.test_sqlite_run_store tests.test_agent_events tests.test_ci_profiles tests.test_workspace_quota tests.test_quota_store tests.test_skill_registry tests.test_mcp_adapter
 ```
 
 如果改到 API server，再跑：
@@ -44,7 +44,7 @@ python -m unittest tests.test_api_server_foundation
 python -m unittest tests.test_agent_runtime tests.test_agent_lifecycle tests.test_agent_events tests.test_agent_tool_loop tests.test_run_store tests.test_sqlite_run_store
 ```
 
-禁止误判：RunStore/SQLite/API/run listing/DB-backed events 都是阶段性能力，不等于 Postgres、分布式任务队列、分布式事件总线、WebSocket、全文搜索或生产级调度已完成。
+禁止误判：RunStore/SQLite/API/run listing/DB-backed events/SQLite quota backend 都是阶段性能力，不等于 Postgres、分布式任务队列、分布式事件总线、WebSocket、全文搜索、全局限流或生产级调度已完成。
 
 ---
 
@@ -61,6 +61,7 @@ P1_heavyweight_provider_model_ci_profiles_implemented_v1 = true
 P1_auth_api_key_workspace_scope_implemented_v1 = true
 P1_auth_audit_rate_limit_implemented_v1 = true
 P1_workspace_budget_quota_implemented_v1 = true
+P1_sqlite_quota_rate_limit_backend_implemented_v1 = true
 P1_agent_lifecycle_resume_cancel_retry_implemented_v1 = true
 P1_agent_lifecycle_api_endpoints_implemented_v1 = true
 P1_agent_run_store_abstraction_implemented_v1 = true
@@ -154,34 +155,17 @@ P1_db_backed_agent_events_implemented_v1 = true
 
 ## T006：Distributed quota/rate limit backend interface
 
-目标：为 quota/rate limit 增加 backend 抽象，先支持 file 和 sqlite。
+状态：**已完成**。
 
-建议文件：
-
-```text
-services/rate_limiter.py
-services/workspace_quota.py
-services/quota_store.py
-tests/test_workspace_quota.py
-tests/test_auth_audit_rate_limit.py
-docs/p1_workspace_quota.md
-docs/p1_auth_api_keys.md
-docs/implementation_status.md
-```
-
-验收标准：
-
-- 默认 file backend 不变。
-- 新增 SQLite backend。
-- 支持原子更新 request/token/cost 计数。
-- 支持 daily/monthly key。
-- API middleware / Agent quota 可选择 backend。
+完成内容：`services/quota_store.py`、`FileQuotaStore`、`SQLiteQuotaStore`、rate limit backend 接入、workspace quota backend 接入、`FOUNDATION_QUOTA_BACKEND=file|sqlite`、`FOUNDATION_QUOTA_DB=...`、测试、文档、状态同步。
 
 状态标记：
 
 ```text
 P1_sqlite_quota_rate_limit_backend_implemented_v1 = true
 ```
+
+边界：SQLite quota/rate limit backend 完成不等于 Postgres/distributed quota、全局限流或完整账单系统完成。
 
 ---
 
@@ -198,6 +182,18 @@ release_run(run_id, worker_id)
 find_expired_leases()
 ```
 
+建议文件：
+
+```text
+agent/run_store.py
+agent/sqlite_run_store.py
+agent/lifecycle.py
+tests/test_sqlite_run_store.py
+tests/test_agent_lifecycle.py
+docs/p1_agent_run_store.md
+docs/implementation_status.md
+```
+
 状态标记：
 
 ```text
@@ -208,9 +204,35 @@ P1_agent_worker_lease_implemented_v1 = true
 
 ---
 
+## T008：PostgresRunStore interface scaffold v1
+
+目标：增加 Postgres run store 接口骨架和配置选择，但不要求在 core CI 连接真实 Postgres。
+
+建议文件：
+
+```text
+agent/postgres_run_store.py
+agent/run_store.py
+agent/lifecycle.py
+inference/api_server.py
+tests/test_run_store.py
+docs/p1_agent_run_store.md
+docs/implementation_status.md
+```
+
+状态标记：
+
+```text
+P1_postgres_run_store_scaffold_implemented_v1 = true
+```
+
+边界：scaffold 完成不等于真实生产 Postgres 部署完成。
+
+---
+
 # Phase C：Provider 原生能力
 
-## T008：provider-native bidirectional continuation adapter v1
+## T009：provider-native bidirectional continuation adapter v1
 
 目标：实现真正 provider-native same-stream tool result continuation 的第一个 adapter。
 
