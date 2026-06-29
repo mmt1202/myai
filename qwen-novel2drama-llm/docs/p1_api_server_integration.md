@@ -119,10 +119,38 @@ Postgres dependency profile:
 python -m pip install -r requirements/postgres-run-store.txt
 ```
 
-Postgres schema:
+Postgres schema and migration runner:
 
 ```text
 migrations/postgres_run_store.sql
+scripts/apply_postgres_run_store_migration.py
+```
+
+Dry-run migration plan:
+
+```bash
+python scripts/apply_postgres_run_store_migration.py --dry-run --json
+```
+
+Apply migration:
+
+```bash
+python scripts/apply_postgres_run_store_migration.py --json
+```
+
+Optional pool env:
+
+```text
+FOUNDATION_AGENT_RUN_POSTGRES_POOL_ENABLED=false
+FOUNDATION_AGENT_RUN_POSTGRES_POOL_MIN=1
+FOUNDATION_AGENT_RUN_POSTGRES_POOL_MAX=5
+FOUNDATION_AGENT_RUN_POSTGRES_POOL_TIMEOUT=30
+```
+
+Example env template:
+
+```text
+configs/run_store/postgres.example.env
 ```
 
 When `/v1/agent/run` completes, runtime writes request/report/artifact index into the selected run store while retaining file artifacts for compatibility.
@@ -160,7 +188,7 @@ All lifecycle, event and run listing endpoints use `agent:run` auth scope.
 
 - Runtime still writes compatibility file artifacts.
 - SQLite events are local-node events, not a distributed event bus.
-- Postgres persistence v1 is implemented, but there is no migration runner or connection pool profile yet.
+- Postgres migration runner and pool config exist, but schema version tracking, health checks and production deployment profiles are not complete.
 - Real Postgres tests are DSN-gated and not part of default core CI.
 - Worker leases are cooperative and not a full worker queue.
 - SSE is polling-based, not WebSocket or push-based infrastructure.
