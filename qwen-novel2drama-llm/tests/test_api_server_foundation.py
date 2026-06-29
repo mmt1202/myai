@@ -21,6 +21,7 @@ class FoundationApiServerTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertIn("router", result["capabilities"])
         self.assertIn("agent_events", result["capabilities"])
+        self.assertIn("agent_db_events", result["capabilities"])
         self.assertIn("agent_lifecycle", result["capabilities"])
         self.assertIn("agent_run_store", result["capabilities"])
         self.assertIn("agent_run_query", result["capabilities"])
@@ -95,6 +96,7 @@ class FoundationApiServerTests(unittest.TestCase):
                 result = api_server.agent_events_api(run_id="run1")
                 self.assertEqual(result["status"], "ok")
                 self.assertEqual(result["output"]["run_id"], "run1")
+                self.assertEqual(result["output"]["events_source"], "run_store")
                 self.assertEqual(len(result["output"]["events"]), 2)
                 self.assertEqual(result["output"]["summary"]["terminal_event"]["event_type"], "run_completed")
             finally:
@@ -158,6 +160,17 @@ class FoundationApiServerTests(unittest.TestCase):
                 self.assertEqual(runs_result["status"], "ok")
                 self.assertEqual(runs_result["output"]["run_store"]["type"], "sqlite")
                 self.assertIn("sqlite_demo", [item["run_id"] for item in runs_result["output"]["runs"]])
+
+                events_file = api_server.agent_events_path("sqlite_demo")
+                if events_file.exists():
+                    events_file.unlink()
+                events_result = api_server.agent_events_api(run_id="sqlite_demo")
+                self.assertEqual(events_result["status"], "ok")
+                self.assertEqual(events_result["output"]["run_store"]["type"], "sqlite")
+                self.assertEqual(events_result["output"]["events_source"], "run_store")
+                event_types = {event["event_type"] for event in events_result["output"]["events"]}
+                self.assertIn("run_started", event_types)
+                self.assertIn("run_completed", event_types)
             finally:
                 api_server.AGENT_OUTPUT_DIR = original_dir
                 if old_store is None:
