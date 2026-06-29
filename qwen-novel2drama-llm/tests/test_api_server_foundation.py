@@ -12,6 +12,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "inference"))
 
 import inference.api_server as api_server
 from agent.events import write_agent_event
+from agent.worker_dispatcher import enqueue_run
 from fastapi.responses import StreamingResponse
 
 
@@ -26,6 +27,44 @@ class FoundationApiServerTests(unittest.TestCase):
         self.assertIn("agent_run_store", result["capabilities"])
         self.assertIn("agent_run_query", result["capabilities"])
         self.assertIn("provider_stream", result["capabilities"])
+        self.assertIn("api_quota", result["capabilities"])
+        self.assertIn("queue_observability", result["capabilities"])
+        self.assertIn("readiness", result["capabilities"])
+
+    def test_readiness_and_deep_health_report_components(self) -> None:
+        result = api_server.readiness_api()
+        self.assertIn(result["status"], {"ok", "degraded"})
+        self.assertIn("run_store", result["components"])
+        self.assertIn("quota_backend", result["components"])
+        self.assertIn("queue", result["components"])
+        deep = api_server.deep_health_api()
+        self.assertIn("provider_registry", deep["components"])
+
+    def test_api_quota_path_selection_is_env_gated(self) -> None:
+        old_enabled = os.environ.get("FOUNDATION_API_QUOTA_ENABLED")
+        old_paths = os.environ.get("FOUNDATION_API_QUOTA_PATHS")
+        try:
+            os.environ["FOUNDATION_API_QUOTA_ENABLED"] = "true"
+            os.environ["FOUNDATION_API_QUOTA_PATHS"] = "/v1/chat,/v1/agent/*"
+            self.assertTrue(api_server.api_quota_enabled_from_env())
+            self.assertTrue(api_server.api_quota_applies("/v1/chat", "POST"))
+            self.assertTrue(api_server.api_quota_applies("/v1/agent/run", "POST"))
+            self.assertFalse(api_server.api_quota_applies("/v1/health", "GET"))
+            self.assertFalse(api_server.api_quota_applies("/v1/token/count", "POST"))
+        finally:
+            if old_enabled is None:
+                os.environ.pop("FOUNDATION_API_QUOTA_ENABLED", None)
+            else:
+                os.environ["FOUNDATION_API_QUOTA_ENABLED"] = old_enabled
+            if old_paths is None:
+                os.environ.pop("FOUNDATION_API_QUOTA_PATHS", None)
+            else:
+                os.environ["FOUNDATION_API_QUOTA_PATHS"] = old_paths
+
+    def test_api_quota_usage_estimates_request(self) -> None:
+        usage, cost = api_server.api_quota_usage({"input": [{"type": "text", "text": "hello"}], "expected_output_tokens": 10})
+        self.assertGreaterEqual(usage["total_tokens"], 10)
+        self.assertEqual(cost, {})
 
     def test_token_count_api(self) -> None:
         result = api_server.token_count_api({"request_id": "r1", "input": [{"type": "text", "text": "hello"}], "expected_output_tokens": 10})
@@ -85,6 +124,19 @@ class FoundationApiServerTests(unittest.TestCase):
         self.assertEqual(api_server.agent_output_dir_for({"run_id": "run1"}).name, "run1")
         self.assertEqual(api_server.agent_output_dir_for({}).name, "latest")
 
+    def test_agent_queue_api_reports_queued_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original = api_server.AGENT_OUTPUT_DIR
+            api_server.AGENT_OUTPUT_DIR = Path(tmpdir)
+            try:
+                enqueue_run(api_server.agent_run_store(), {"run_id": "q1", "task": "hello", "approval_policy": "never"})
+                result = api_server.agent_queue_api(limit=10)
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(result["output"]["counts"]["queued"], 1)
+                self.assertEqual(result["output"]["samples"]["queued"][0]["run_id"], "q1")
+            finally:
+                api_server.AGENT_OUTPUT_DIR = original
+
     def test_agent_events_api_reads_json_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             original = api_server.AGENT_OUTPUT_DIR
@@ -112,20 +164,16 @@ class FoundationApiServerTests(unittest.TestCase):
                 status_result = api_server.agent_status_api(run_id="demo")
                 self.assertEqual(status_result["status"], "ok")
                 self.assertEqual(status_result["output"]["status"], "completed")
-
                 cancel_result = api_server.agent_cancel_api({"run_id": "cancel_me", "reason": "user_requested"})
                 self.assertEqual(cancel_result["status"], "ok")
                 self.assertEqual(cancel_result["output"]["status"], "cancelled")
-
                 retry_result = api_server.agent_retry_api({"run_id": "demo", "new_run_id": "demo_retry", "overrides": {"task": "retry hello"}})
                 self.assertEqual(retry_result["status"], "ok")
                 self.assertEqual(retry_result["output"]["new_run_id"], "demo_retry")
                 self.assertEqual(retry_result["output"]["run"]["retry_of"], "demo")
-
                 resume_result = api_server.agent_resume_api({"run_id": "demo", "new_run_id": "demo_resume", "allow_completed": True})
                 self.assertEqual(resume_result["status"], "ok")
                 self.assertEqual(resume_result["output"]["run"]["resume_of"], "demo")
-
                 runs_result = api_server.agent_runs_api(workspace_id="w1", limit=10)
                 self.assertEqual(runs_result["status"], "ok")
                 self.assertGreaterEqual(runs_result["output"]["total"], 1)
@@ -144,23 +192,19 @@ class FoundationApiServerTests(unittest.TestCase):
             try:
                 store = api_server.agent_run_store()
                 self.assertEqual(store.metadata()["type"], "sqlite")
-
                 run_result = api_server.agent_run_api({"run_id": "sqlite_demo", "task": "hello", "route_mode": "balanced", "privacy": {"local_only": True}, "approval_policy": "never", "workspace_id": "sqlite_ws"})
                 self.assertEqual(run_result["status"], "ok")
                 status_result = api_server.agent_status_api(run_id="sqlite_demo")
                 self.assertEqual(status_result["status"], "ok")
                 self.assertEqual(status_result["output"]["run_store"]["type"], "sqlite")
                 self.assertEqual(status_result["output"]["status"], "completed")
-
                 retry_result = api_server.agent_retry_api({"run_id": "sqlite_demo", "new_run_id": "sqlite_retry", "overrides": {"task": "retry sqlite"}})
                 self.assertEqual(retry_result["status"], "ok")
                 self.assertEqual(api_server.agent_status_api(run_id="sqlite_retry")["output"]["status"], "completed")
-
                 runs_result = api_server.agent_runs_api(workspace_id="sqlite_ws", query="hello")
                 self.assertEqual(runs_result["status"], "ok")
                 self.assertEqual(runs_result["output"]["run_store"]["type"], "sqlite")
                 self.assertIn("sqlite_demo", [item["run_id"] for item in runs_result["output"]["runs"]])
-
                 events_file = api_server.agent_events_path("sqlite_demo")
                 if events_file.exists():
                     events_file.unlink()
