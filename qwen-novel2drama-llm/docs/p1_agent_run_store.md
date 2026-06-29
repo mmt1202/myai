@@ -75,8 +75,65 @@ Core operations:
 - `load_cancel_request(run_id)`
 - `save_cancel_request(run_id, marker)`
 - `cancel_requested(run_id)`
+- `save_artifact(run_id, name, artifact, path=None)`
+- `list_runs(...)`
 - `status(run_id)`
 - `metadata()`
+
+## Run listing/query
+
+Both stores now expose:
+
+```python
+list_runs(
+    status=None,
+    owner_id=None,
+    project_id=None,
+    workspace_id=None,
+    parent_run_id=None,
+    query=None,
+    limit=50,
+    offset=0,
+    order="desc",
+)
+```
+
+The return shape is:
+
+```json
+{
+  "runs": [
+    {
+      "run_id": "demo",
+      "status": "completed",
+      "error": null,
+      "created_at": "...",
+      "updated_at": "...",
+      "completed_at": "...",
+      "task": "...",
+      "owner_id": "...",
+      "project_id": "...",
+      "workspace_id": "...",
+      "parent_run_id": null,
+      "retry_of": null,
+      "resume_of": null,
+      "route_mode": "balanced",
+      "selected_model_id": "local.qwen2_5_1_5b_instruct",
+      "artifact_count": 4,
+      "has_provider_response": false,
+      "run_store": {"type": "file"}
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0,
+  "order": "desc",
+  "filters": {},
+  "run_store": {"type": "file"}
+}
+```
+
+`query` is a lightweight substring search over run id, task, status, error, owner/project/workspace id and selected model id. This is not a full-text search engine.
 
 ## File-backed implementation
 
@@ -96,25 +153,7 @@ cancel_requested.json    -> cancellation marker
 agent_run_created.json   -> initial created run snapshot
 ```
 
-`FileRunStore.status(run_id)` returns:
-
-```json
-{
-  "run_id": "demo",
-  "status": "completed",
-  "error": null,
-  "created_at": "...",
-  "updated_at": "...",
-  "completed_at": "...",
-  "cancel_requested": false,
-  "artifacts": {},
-  "event_summary": {},
-  "run_store": {
-    "type": "file",
-    "output_root": "outputs/agent_runtime/api"
-  }
-}
-```
+`FileRunStore.list_runs()` scans child directories and reads `agent_run_report.json`. This is suitable for local/dev usage and small run directories, not high-volume production query workloads.
 
 ## SQLite-backed implementation
 
@@ -155,6 +194,7 @@ Core operations supported in v1:
 - `append_event(run_id, event)` / `load_events(run_id)` / `event_summary(run_id)`
 - `save_cancel_request(run_id, marker)` / `load_cancel_request(run_id)` / `cancel_requested(run_id)`
 - `save_artifact(run_id, name, artifact, path=None)` for database-backed artifact index entries
+- `list_runs(...)` with status/owner/project/workspace/parent/query/pagination filters
 - `status(run_id)` with the same high-level shape as `FileRunStore.status()` and `run_store.type = "sqlite"`
 
 Missing runs or missing request/report records raise `RunNotFoundError` so callers can treat SQLite and file-backed stores consistently.
@@ -179,8 +219,10 @@ python agent/lifecycle.py --run-store sqlite --sqlite-path outputs/agent_runtime
 
 ## API integration
 
-The API endpoints continue to call lifecycle functions:
+The API endpoints call lifecycle/run store functions:
 
+- `POST /v1/agent/run`
+- `GET /v1/agent/runs`
 - `GET /v1/agent/status`
 - `POST /v1/agent/cancel`
 - `POST /v1/agent/retry`
@@ -195,7 +237,11 @@ FOUNDATION_AGENT_RUN_DB=outputs/agent_runtime/runs.sqlite
 
 Default behavior remains file-backed.
 
-When `/v1/agent/run` completes, the API server indexes the request/report into the selected run store with `index_run_in_store()`. This makes `GET /v1/agent/status` work for SQLite-backed runs before the full runtime artifact migration is implemented.
+`GET /v1/agent/runs` supports query parameters matching `list_runs(...)`:
+
+```text
+GET /v1/agent/runs?status=completed&workspace_id=w1&query=demo&limit=50&offset=0&order=desc
+```
 
 ## Safety
 
@@ -211,16 +257,16 @@ This keeps file paths and store keys from path traversal.
 ## Current limitations
 
 - Implemented stores are `FileRunStore` and local `SQLiteRunStore`.
-- API/lifecycle can select SQLite, but runtime artifact writes still primarily use file paths directly.
+- API/lifecycle can select SQLite, but runtime artifact files still remain the compatibility output.
+- File-backed listing scans local run directories and is not intended for large-scale production search.
+- SQLite listing uses local SQLite/Python filtering and is not a distributed query service.
 - API Agent events still read JSONL files; full DB-backed event streaming is a later task.
 - No Postgres implementation yet; SQLite is local-only and not distributed.
 - No transaction, lock, lease or distributed concurrency control yet.
-- No run listing/query index yet.
 
 ## Next steps
 
-- Migrate runtime artifact writes to the store interface.
-- Add run listing and query filters.
 - Add DB-backed Agent events and lifecycle status reads.
 - Add locking/lease semantics for distributed workers.
 - Add Postgres run store implementation.
+- Add richer search indexes if run volume grows.
