@@ -26,6 +26,7 @@ class CIProfilesTests(unittest.TestCase):
         self.assertIn("tests.test_foundation_core_services", command)
         self.assertIn("tests.test_run_store", command)
         self.assertIn("tests.test_sqlite_run_store", command)
+        self.assertIn("tests.test_quota_store", command)
 
     def test_api_server_profile_has_api_requirements(self) -> None:
         profile = PROFILES["api-server"]
