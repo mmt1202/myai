@@ -1,0 +1,27 @@
+profile: myai-foundation-security
+managed_secrets:
+  providers:
+    - aws-secrets-manager
+    - gcp-secret-manager
+    - azure-key-vault
+    - vault
+  required_refs:
+    - provider-api-keys
+    - database-dsn
+    - media-provider-credentials
+edge:
+  waf:
+    enabled: true
+    baseline_rules:
+      - request-size-limit
+      - path-traversal-block
+      - suspicious-user-agent-block
+      - rate-limit-by-workspace
+  cdn:
+    enabled: true
+    asset_paths:
+      - /assets/*
+      - /media/*
+certificates:
+  tls_required: true
+  rotation_days: 60
