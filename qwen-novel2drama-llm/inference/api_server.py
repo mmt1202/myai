@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from model_version_registry import resolve_model_paths
 from pydantic import BaseModel, Field
 
-from agent.events import read_agent_events, summarize_agent_events
+from agent.events import summarize_agent_events
 from agent.lifecycle import cancel_run, resume_run, retry_run, status_run
 from agent.run_store import RunStore, build_run_store, default_sqlite_path
 from agent.runtime import run_agent_once
@@ -106,14 +106,7 @@ def ok(body: dict[str, Any], output: Any, **kwargs: Any) -> dict[str, Any]:
 
 
 def failed(body: dict[str, Any], code: str, message: str, **kwargs: Any) -> dict[str, Any]:
-    return response_envelope(
-        status="failed",
-        request_id_value=request_id(body),
-        trace_id=trace_id(body),
-        output=kwargs.get("output"),
-        route=kwargs.get("route"),
-        error={"code": code, "message": message, "retryable": False, "details": kwargs},
-    )
+    return response_envelope(status="failed", request_id_value=request_id(body), trace_id=trace_id(body), output=kwargs.get("output"), route=kwargs.get("route"), error={"code": code, "message": message, "retryable": False, "details": kwargs})
 
 
 def safe_run_id(value: str | None) -> str:
@@ -148,6 +141,19 @@ def agent_output_dir_for(body: dict[str, Any]) -> Path:
 def agent_events_path(run_id: str | None) -> Path:
     store = agent_run_store()
     return store.artifact_path(safe_run_id(run_id), "events.jsonl")
+
+
+def load_agent_events_from_store(run_id: str) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+    store = agent_run_store()
+    metadata = store.metadata()
+    try:
+        return store.load_events(safe_run_id(run_id)), metadata, "run_store"
+    except FileNotFoundError:
+        return [], metadata, "missing_run"
+    except ValueError:
+        raise
+    except Exception:  # noqa: BLE001
+        return [], metadata, "run_store_error"
 
 
 def events_after(events: list[dict[str, Any]], since_event_id: str | None = None) -> list[dict[str, Any]]:
@@ -187,11 +193,11 @@ def stream_provider_sse(chunks: Iterator[dict[str, Any]]) -> Iterator[str]:
 
 
 async def stream_agent_events(run_id: str, *, since_event_id: str | None = None, poll_interval: float = 1.0, max_seconds: int = 60, limit: int = 200) -> AsyncIterator[str]:
-    events_path = agent_events_path(run_id)
     last_event_id = since_event_id
     deadline = time.time() + max(1, max_seconds)
     while True:
-        events = limited_events(events_after(read_agent_events(events_path), last_event_id), limit)
+        loaded, _, _ = load_agent_events_from_store(run_id)
+        events = limited_events(events_after(loaded, last_event_id), limit)
         for event in events:
             last_event_id = str(event.get("event_id") or last_event_id or "")
             yield sse_event(event)
@@ -262,7 +268,7 @@ def health() -> dict[str, str | None]:
 
 @app.get("/v1/health")
 def foundation_health() -> dict[str, Any]:
-    return {"status": "ok", "service": "myai-foundation", "model_version": ACTIVE_MODEL_VERSION, "model_path": ACTIVE_MODEL_PATH, "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "agent_run_store", "agent_run_query", "provider", "provider_stream", "auth", "rate_limit", "audit"]}
+    return {"status": "ok", "service": "myai-foundation", "model_version": ACTIVE_MODEL_VERSION, "model_path": ACTIVE_MODEL_PATH, "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "agent_run_store", "agent_run_query", "agent_db_events", "provider", "provider_stream", "auth", "rate_limit", "audit"]}
 
 
 @app.post("/generate", response_model=GenerateResponse)
@@ -376,9 +382,9 @@ def agent_events_api(run_id: str = "latest", stream: bool = False, since_event_i
     safe_id = safe_run_id(run_id)
     if stream:
         return StreamingResponse(stream_agent_events(safe_id, since_event_id=since_event_id, poll_interval=poll_interval, max_seconds=max_seconds, limit=limit), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-    events_path = agent_events_path(safe_id)
-    events = limited_events(events_after(read_agent_events(events_path), since_event_id), limit)
-    return ok({"request_id": safe_id}, {"run_id": safe_id, "events": events, "summary": summarize_agent_events(events), "events_path": str(events_path)})
+    loaded, source_store, source = load_agent_events_from_store(safe_id)
+    events = limited_events(events_after(loaded, since_event_id), limit)
+    return ok({"request_id": safe_id}, {"run_id": safe_id, "events": events, "summary": summarize_agent_events(events), "events_source": source, "events_path": str(agent_events_path(safe_id)), "run_store": source_store})
 
 
 @app.get("/v1/agent/status")
