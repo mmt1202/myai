@@ -8,6 +8,7 @@ Implemented files:
 
 - `providers/__init__.py`
 - `providers/base.py`
+- `providers/realtime_base.py`
 - `providers/openai_compatible.py`
 - `providers/local_text.py`
 - `providers/factory.py`
@@ -48,23 +49,15 @@ The base contract standardizes:
 
 ## Provider stream events
 
-Provider streams emit standard chunks:
-
-```json
-{
-  "chunk_id": "chunk_...",
-  "event_type": "provider_stream_delta",
-  "delta": "partial text",
-  "done": false
-}
-```
-
 Supported event types:
 
 - `provider_stream_started`
 - `provider_stream_delta`
 - `provider_stream_tool_call_delta`
 - `provider_stream_tool_result`
+- `provider_stream_continuation_started`
+- `provider_stream_continuation_delta`
+- `provider_stream_continuation_completed`
 - `provider_stream_continuation_unsupported`
 - `provider_stream_continuation_failed`
 - `provider_stream_completed`
@@ -94,21 +87,51 @@ The provider hook is:
 provider.continue_stream_with_tool_result(request, tool_call, tool_result, stream_context)
 ```
 
-Current built-in providers use the default unsupported implementation. Agent can still request `same_stream_tool_result_injection`; unsupported providers emit `provider_stream_continuation_unsupported` and fall back to the normal next-provider-request tool loop.
+Unsupported providers emit `provider_stream_continuation_unsupported` through the Agent stream bridge and fall back to the normal next-provider-request tool loop.
 
-Model instances can declare future native support under runtime config:
+Model instances can declare native support under runtime config:
 
 ```json
 {
   "runtime_config": {
     "bidirectional_tool_continuation": {
       "supported": true,
-      "protocol": "provider-specific-realtime",
+      "protocol": "provider_native_test",
       "mode": "provider_native"
     }
   }
 }
 ```
+
+## Provider-native continuation adapter
+
+`providers/realtime_base.py` defines the provider-native continuation adapter boundary:
+
+- `ProviderNativeContinuationAdapter`
+- `TestDoubleContinuationAdapter`
+- `adapter_for_protocol(protocol)`
+- `provider_stream_continuation_started`
+- `provider_stream_continuation_delta`
+- `provider_stream_continuation_completed`
+
+The test-double protocols are:
+
+```text
+provider_native_test
+openai_realtime_test
+openai_responses_test
+```
+
+These protocols do not call a real provider. They prove that a provider-native continuation adapter can emit continuation chunks through the provider factory and Agent stream bridge without falling back to a next provider request.
+
+Known real protocol names are reserved:
+
+```text
+openai_realtime
+openai_responses
+```
+
+They require dedicated provider-specific sessions before being marked operational.
 
 ## OpenAI-compatible provider
 
@@ -133,6 +156,7 @@ It can:
 - append fragmented `function.name` and `function.arguments`
 - decode complete JSON arguments into `arguments_json` when possible
 - include final streamed text, usage and reconstructed tool calls in `provider_stream_completed`
+- route explicitly configured provider-native test continuation protocols to `providers/realtime_base.py`
 
 Native OpenAI-compatible streaming through CLI:
 
@@ -174,59 +198,9 @@ It can:
 - return standard response envelopes
 - estimate usage for local runs
 
-Local provider config can come from request fields:
-
-```json
-{
-  "model_path": "/path/to/model",
-  "adapter_path": "/path/to/lora",
-  "system_prompt_file": "prompts/system_prompt.txt",
-  "use_cache": true,
-  "serialize_generation": true,
-  "stream": true,
-  "stream_chunk_chars": 128
-}
-```
-
-or environment variables:
-
-```text
-FOUNDATION_LOCAL_MODEL_PATH
-FOUNDATION_LOCAL_ADAPTER_PATH
-FOUNDATION_LOCAL_SYSTEM_PROMPT
-```
-
-Streaming local provider through CLI:
-
-```bash
-python providers/local_text.py \
-  --request examples/provider_request.json \
-  --model-path /path/to/model \
-  --stream
-```
-
-Dry-run local provider stream through factory:
-
-```bash
-python providers/factory.py \
-  --request examples/provider_request.json \
-  --instances configs/model_instance_registry.json \
-  --model-id local.qwen2_5_1_5b_instruct \
-  --stream
-```
-
-Check provider continuation capability through factory:
-
-```bash
-python providers/factory.py \
-  --request examples/provider_request.json \
-  --instances configs/model_instance_registry.json \
-  --model-id local.qwen2_5_1_5b_instruct \
-  --continuation-capability
-```
-
 ## Current limitations
 
-- Built-in providers do not yet implement provider-native same-stream continuation.
-- Same-stream tool-result injection currently emits auditable fallback events and uses the next-provider-request loop.
-- Provider-specific realtime protocols still need dedicated adapters.
+- Provider-native continuation v1 includes a test-double adapter and explicit OpenAI-compatible routing for configured test protocols.
+- Real OpenAI Realtime/Responses same-session tool-result injection is still not implemented.
+- Same-stream continuation can still fall back to the next-provider-request loop when unsupported.
+- Provider-specific realtime session management still needs dedicated adapters.
