@@ -283,6 +283,7 @@ components:
         model: {type: object, additionalProperties: true}
         delta: {type: [string, 'null']}
         output: {type: [object, 'null'], additionalProperties: true}
+        tool_calls: {type: array, items: {$ref: '#/components/schemas/ProviderToolCall'}}
         usage: {type: object, additionalProperties: true}
         error: {type: [object, 'null'], additionalProperties: true}
         done: {type: boolean}
