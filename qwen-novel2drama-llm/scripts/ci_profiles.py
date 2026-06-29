@@ -72,6 +72,12 @@ PROFILES: dict[str, CIProfile] = {
         requirements=("requirements/postgres-run-store.txt",),
         tests=("tests.test_postgres_run_store_contract",),
     ),
+    "postgres-quota": CIProfile(
+        name="postgres-quota",
+        description="Optional Postgres quota store contract tests. Real DB tests are DSN gated.",
+        requirements=("requirements/postgres-quota.txt",),
+        tests=("tests.test_postgres_quota_store",),
+    ),
     "local-provider-contract": CIProfile(
         name="local-provider-contract",
         description="Local provider dry-run/cache/streaming contract tests using mocks, without installing torch or transformers.",
@@ -91,7 +97,7 @@ PROFILES: dict[str, CIProfile] = {
 
 PROFILE_GROUPS: dict[str, tuple[str, ...]] = {
     "default": ("contracts", "core"),
-    "optional": ("provider-adapter", "provider-smoke", "api-server", "postgres-run-store", "local-provider-contract"),
+    "optional": ("provider-adapter", "provider-smoke", "api-server", "postgres-run-store", "postgres-quota", "local-provider-contract"),
     "heavyweight": ("local-model-imports",),
     "all": tuple(PROFILES),
 }
