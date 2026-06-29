@@ -1,0 +1,8 @@
+{
+  "suite": "drama_eval",
+  "cases": [
+    {"case_id": "case_parse", "task": "drama_eval", "request": {"actual": {"chapters": 2, "characters": true}}, "expected": {"chapters": 2, "characters": true}},
+    {"case_id": "case_outline", "task": "drama_eval", "request": {"actual": {"episodes": 3, "hook": true}}, "expected": {"episodes": 3, "hook": true}},
+    {"case_id": "case_video", "task": "drama_eval", "request": {"actual": {"targets": 4, "ratio": "9:16"}}, "expected": {"targets": 4, "ratio": "9:16"}}
+  ]
+}
