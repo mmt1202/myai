@@ -2,6 +2,11 @@ name: Foundation Provider Smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      run_real_provider:
+        description: Enable real provider smoke tests
+        required: false
+        default: "false"
 
 permissions:
   contents: read
@@ -13,15 +18,32 @@ jobs:
       run:
         working-directory: qwen-novel2drama-llm
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Show profile
         run: python scripts/ci_profiles.py --profile provider-smoke
+
       - name: Install profile
         run: python -m pip install -r requirements/provider-smoke.txt
+
       - name: Run config tests
         run: python -m unittest tests.test_provider_smoke_config
+
       - name: Dry-run smoke runner
         run: python scripts/provider_smoke_test.py --dry-run --json
+
+      - name: Run gated real provider smoke
+        if: ${{ github.event.inputs.run_real_provider == 'true' }}
+        env:
+          FOUNDATION_PROVIDER_SMOKE_ENABLED: "true"
+          FOUNDATION_PROVIDER_SMOKE_BASE_URL: ${{ vars.FOUNDATION_PROVIDER_SMOKE_BASE_URL }}
+          FOUNDATION_PROVIDER_SMOKE_MODEL: ${{ vars.FOUNDATION_PROVIDER_SMOKE_MODEL }}
+          FOUNDATION_PROVIDER_SMOKE_CREDENTIAL_ENV: FOUNDATION_PROVIDER_SMOKE_TOKEN
+          FOUNDATION_PROVIDER_SMOKE_TOKEN: ${{ secrets.FOUNDATION_PROVIDER_SMOKE_TOKEN }}
+        run: python scripts/provider_smoke_test.py --json --fail-on-skip
