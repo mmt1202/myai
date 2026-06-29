@@ -1,0 +1,2 @@
+# Provider smoke tests use only standard-library HTTP for now.
+# Keep this file as a separate optional profile for future provider-specific clients.
