@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -147,25 +148,79 @@ def delete_memory(path: Path, memory_id: str) -> dict[str, Any] | None:
     return deleted
 
 
+class FileMemoryStore:
+    def __init__(self, path: Path | str):
+        self.path = Path(path)
+
+    def metadata(self) -> dict[str, Any]:
+        return {"type": "file", "path": str(self.path)}
+
+    def write(self, item: dict[str, Any]) -> dict[str, Any]:
+        return write_memory(self.path, item)
+
+    def read(self, *, include_deleted: bool = False) -> list[dict[str, Any]]:
+        return read_memory(self.path, include_deleted=include_deleted)
+
+    def search(self, query: dict[str, Any]) -> list[dict[str, Any]]:
+        return search_memory(self.path, query)
+
+    def delete(self, memory_id: str) -> dict[str, Any] | None:
+        return delete_memory(self.path, memory_id)
+
+
+def default_memory_jsonl_path(project_root: Path | None = None) -> Path:
+    root = project_root or Path.cwd()
+    return root / "outputs" / "memory" / "memory.jsonl"
+
+
+def default_memory_sqlite_path(project_root: Path | None = None) -> Path:
+    root = project_root or Path.cwd()
+    return root / "outputs" / "memory" / "memory.sqlite"
+
+
+def build_memory_store(kind: str = "file", *, jsonl_path: Path | str | None = None, sqlite_path: Path | str | None = None, project_root: Path | None = None):
+    normalized = (kind or "file").lower().strip()
+    if normalized in {"file", "jsonl"}:
+        return FileMemoryStore(jsonl_path or default_memory_jsonl_path(project_root))
+    if normalized in {"sqlite", "sqlite3"}:
+        from services.sqlite_memory_store import SQLiteMemoryStore
+
+        return SQLiteMemoryStore(sqlite_path or default_memory_sqlite_path(project_root))
+    if normalized in {"vector", "hybrid"}:
+        from services.vector_memory_store import VectorMemoryStore
+
+        return VectorMemoryStore(jsonl_path or default_memory_jsonl_path(project_root))
+    raise ValueError(f"unsupported memory backend: {kind}")
+
+
+def memory_store_from_env(*, project_root: Path | None = None):
+    backend = os.environ.get("FOUNDATION_MEMORY_BACKEND", "file")
+    jsonl = os.environ.get("FOUNDATION_MEMORY_STORE") or os.environ.get("FOUNDATION_MEMORY_JSONL")
+    sqlite_db = os.environ.get("FOUNDATION_MEMORY_DB") or os.environ.get("FOUNDATION_MEMORY_SQLITE_DB")
+    return build_memory_store(backend, jsonl_path=Path(jsonl) if jsonl else None, sqlite_path=Path(sqlite_db) if sqlite_db else None, project_root=project_root)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--store", default="outputs/memory/memory.jsonl")
+    parser.add_argument("--backend", default=os.environ.get("FOUNDATION_MEMORY_BACKEND", "file"))
+    parser.add_argument("--store", default=None)
+    parser.add_argument("--db", default=None)
     parser.add_argument("--write", default=None)
     parser.add_argument("--search", default=None)
     parser.add_argument("--delete", default=None)
     parser.add_argument("--include-deleted", action="store_true")
     args = parser.parse_args()
-    path = Path(args.store)
+    store = build_memory_store(args.backend, jsonl_path=Path(args.store) if args.store else None, sqlite_path=Path(args.db) if args.db else None)
     if args.write:
         item = json.loads(Path(args.write).read_text(encoding="utf-8"))
-        result = {"item": write_memory(path, item)}
+        result = {"item": store.write(item), "store": store.metadata()}
     elif args.search:
         query = json.loads(Path(args.search).read_text(encoding="utf-8"))
-        result = {"items": search_memory(path, query)}
+        result = {"items": store.search(query), "store": store.metadata()}
     elif args.delete:
-        result = {"deleted": delete_memory(path, args.delete)}
+        result = {"deleted": store.delete(args.delete), "store": store.metadata()}
     else:
-        result = {"items": read_memory(path, include_deleted=args.include_deleted)}
+        result = {"items": store.read(include_deleted=args.include_deleted), "store": store.metadata()}
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
