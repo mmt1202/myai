@@ -1,6 +1,6 @@
 # P1 Agent Run Store
 
-This layer introduces a replaceable run store contract for Agent run state, event reads, run listing and lifecycle state.
+This layer introduces a replaceable run store contract for Agent run state, event reads, run listing, lifecycle state and worker leases.
 
 Implemented files:
 
@@ -25,7 +25,7 @@ Before this layer, Agent lifecycle code read and wrote these files directly:
 - `events.jsonl`
 - `cancel_requested.json`
 
-The run store abstraction makes those operations explicit so a future database-backed store can replace the file-backed implementation without rewriting lifecycle APIs.
+The run store abstraction makes those operations explicit so future database-backed stores can replace the file-backed implementation without rewriting lifecycle APIs.
 
 ## Contract
 
@@ -74,6 +74,10 @@ Core operations:
 - `cancel_requested(run_id)`
 - `save_artifact(run_id, name, artifact, path=None)`
 - `list_runs(...)`
+- `claim_run(run_id, worker_id, lease_seconds=60)`
+- `renew_lease(run_id, worker_id, lease_seconds=60)`
+- `release_run(run_id, worker_id)`
+- `find_expired_leases()`
 - `status(run_id)`
 - `metadata()`
 
@@ -98,6 +102,52 @@ list_runs(
 ```
 
 `query` is a lightweight substring search over run id, task, status, error, owner/project/workspace id and selected model id. This is not a full-text search engine.
+
+## Worker leases
+
+Worker lease v1 is a cooperative claim layer for future distributed Agent workers.
+
+Operations:
+
+```python
+claim_run(run_id, worker_id, lease_seconds=60)
+renew_lease(run_id, worker_id, lease_seconds=60)
+release_run(run_id, worker_id)
+find_expired_leases()
+```
+
+Rules:
+
+- one active lease per run
+- same worker can renew an active lease
+- another worker cannot claim until the existing lease is expired or released
+- expired leases are discoverable through `find_expired_leases()`
+- status responses include `worker_lease`
+
+File mode persists a compatibility lease artifact:
+
+```text
+worker_lease.json
+```
+
+SQLite mode stores leases in:
+
+```text
+run_leases
+```
+
+SQLite `claim_run`, `renew_lease` and `release_run` use `BEGIN IMMEDIATE` so a single local SQLite writer decides the claim/update atomically.
+
+Lifecycle CLI:
+
+```bash
+python agent/lifecycle.py --run-store sqlite --sqlite-path outputs/agent_runtime/runs.sqlite claim --run-id demo --worker-id worker-a --lease-seconds 60
+python agent/lifecycle.py --run-store sqlite --sqlite-path outputs/agent_runtime/runs.sqlite renew-lease --run-id demo --worker-id worker-a --lease-seconds 60
+python agent/lifecycle.py --run-store sqlite --sqlite-path outputs/agent_runtime/runs.sqlite release --run-id demo --worker-id worker-a
+python agent/lifecycle.py --run-store sqlite --sqlite-path outputs/agent_runtime/runs.sqlite expired-leases
+```
+
+This is a lease primitive, not a complete task queue.
 
 ## Event storage and reads
 
@@ -133,13 +183,14 @@ agent_run_report.json    -> report
 events.jsonl             -> events
 cancel_requested.json    -> cancellation marker
 agent_run_created.json   -> initial created run snapshot
+worker_lease.json        -> cooperative worker lease
 ```
 
 `FileRunStore.list_runs()` scans child directories and reads `agent_run_report.json`. This is suitable for local/dev usage and small run directories, not high-volume production query workloads.
 
 ## SQLite-backed implementation
 
-`SQLiteRunStore` is a local database-backed implementation that uses Python standard-library `sqlite3` only. It is intended for single-node/local persistence and testable lifecycle state, not for distributed leases or Postgres-scale coordination.
+`SQLiteRunStore` is a local database-backed implementation that uses Python standard-library `sqlite3` only. It is intended for single-node/local persistence and testable lifecycle state, not for distributed Postgres-scale coordination.
 
 Required tables are created automatically when the store is constructed:
 
@@ -150,6 +201,7 @@ run_reports
 run_events
 cancel_requests
 run_artifacts
+run_leases
 ```
 
 Minimum persisted fields:
@@ -161,6 +213,7 @@ run_reports: run_id, report_json
 run_events: run_id, event_id, event_type, status, created_at, event_json
 cancel_requests: run_id, marker_json, created_at
 run_artifacts: run_id, name, path, artifact_json
+run_leases: run_id, worker_id, lease_json, lease_expires_at, status, updated_at
 ```
 
 Core operations supported in v1:
@@ -171,6 +224,7 @@ Core operations supported in v1:
 - `save_cancel_request(run_id, marker)` / `load_cancel_request(run_id)` / `cancel_requested(run_id)`
 - `save_artifact(run_id, name, artifact, path=None)` for database-backed artifact index entries
 - `list_runs(...)` with status/owner/project/workspace/parent/query/pagination filters
+- worker lease claim/renew/release/expired listing
 - `status(run_id)` with the same high-level shape as `FileRunStore.status()` and `run_store.type = "sqlite"`
 
 Missing runs or missing request/report records raise `RunNotFoundError` so callers can treat SQLite and file-backed stores consistently.
@@ -202,7 +256,7 @@ Default behavior remains file-backed.
 GET /v1/agent/runs?status=completed&workspace_id=w1&query=demo&limit=50&offset=0&order=desc
 ```
 
-`GET /v1/agent/events` now reads from the selected run store:
+`GET /v1/agent/events` reads from the selected run store:
 
 ```text
 GET /v1/agent/events?run_id=demo
@@ -229,12 +283,13 @@ This keeps file paths and store keys from path traversal.
 - File-backed listing scans local run directories and is not intended for large-scale production search.
 - SQLite listing uses local SQLite/Python filtering and is not a distributed query service.
 - SQLite DB-backed events are local-node events, not a distributed event bus.
+- Worker leases are cooperative and local-store based; they are not a full task queue.
 - No Postgres implementation yet; SQLite is local-only and not distributed.
-- No transaction, lock, lease or distributed concurrency control yet.
+- No distributed worker scheduler yet.
 - SSE is still polling-based, not WebSocket or push-based infrastructure.
 
 ## Next steps
 
-- Add locking/lease semantics for distributed workers.
 - Add Postgres run store implementation.
+- Add full worker queue/dispatcher semantics on top of leases.
 - Add richer search indexes if run volume grows.
