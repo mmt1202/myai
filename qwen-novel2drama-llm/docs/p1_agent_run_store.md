@@ -1,12 +1,14 @@
 # P1 Agent Run Store
 
-This layer introduces a replaceable run store contract for Agent run state, event reads, run listing, lifecycle state and worker leases.
+This layer introduces a replaceable run store contract for Agent run state, event reads, run listing, lifecycle state, worker leases and local queue dispatching.
 
 Implemented files:
 
 - `agent/run_store.py`
 - `agent/sqlite_run_store.py`
 - `agent/postgres_run_store.py`
+- `agent/postgres_migration_history.py`
+- `agent/worker_dispatcher.py`
 - `agent/events.py`
 - `agent/runtime.py`
 - `agent/lifecycle.py`
@@ -18,6 +20,7 @@ Implemented files:
 - `tests/test_run_store.py`
 - `tests/test_sqlite_run_store.py`
 - `tests/test_postgres_run_store_contract.py`
+- `tests/test_worker_dispatcher.py`
 
 ## Contract
 
@@ -51,62 +54,9 @@ pg
 
 Default behavior remains file-backed. SQLite defaults to `<output_root>/runs.sqlite`.
 
-Postgres uses:
-
-```text
-FOUNDATION_AGENT_RUN_POSTGRES_DSN
-```
-
-The DSN value must be supplied by environment or by `postgres_dsn`; do not commit it.
-
 ## Core operations
 
-The run store contract includes:
-
-- request/report load and save
-- event append/read/summary
-- cancel marker load and save
-- artifact index save
-- run listing/query
-- worker lease claim/renew/release/expired listing
-- status and metadata
-
-## File store
-
-`FileRunStore` stores one directory per run:
-
-```text
-<output_root>/<run_id>/
-```
-
-Compatibility artifacts:
-
-```text
-agent_request.json
-agent_run_report.json
-events.jsonl
-cancel_requested.json
-agent_run_created.json
-worker_lease.json
-```
-
-File listing scans local directories and is intended for local/dev workloads.
-
-## SQLite store
-
-`SQLiteRunStore` uses standard-library `sqlite3`. Tables:
-
-```text
-runs
-run_requests
-run_reports
-run_events
-cancel_requests
-run_artifacts
-run_leases
-```
-
-SQLite is local-node persistence, not a distributed store.
+The run store contract includes request/report load and save, event append/read/summary, cancel markers, artifact indexes, run listing/query, worker lease claim/renew/release, status and metadata.
 
 ## Postgres store
 
@@ -131,21 +81,40 @@ python scripts/apply_postgres_run_store_migration.py --dry-run --json
 python scripts/apply_postgres_run_store_migration.py --json
 ```
 
-The runner never prints the DSN value. It only reports whether a DSN is configured.
+The migration runner records applied migrations in:
 
-Runtime methods implemented:
+```text
+schema_migrations
+```
 
-- `init_db(sql_path=...)`
-- `save_request()` / `load_request()`
-- `save_report()` / `load_report()`
-- `append_event()` / `load_events()` / `event_summary()`
-- `save_cancel_request()` / `load_cancel_request()` / `cancel_requested()`
-- `save_artifact()`
-- `list_runs(...)`
-- `claim_run()` / `renew_lease()` / `release_run()` / `find_expired_leases()`
-- `status()`
+Each record stores `migration_id`, `checksum`, `statement_count`, `applied_at` and metadata. Reapplying the same SQL is idempotent; applying the same migration id with a different checksum raises a conflict.
 
 Postgres worker lease operations use `SELECT ... FOR UPDATE` around the lease row so one transaction decides claim/renew/release for that run.
+
+## Worker dispatcher
+
+`agent/worker_dispatcher.py` adds a local dispatcher on top of the RunStore and worker lease contract.
+
+Commands:
+
+```bash
+python agent/worker_dispatcher.py enqueue --request examples/agent_request.json --run-id queued-demo
+python agent/worker_dispatcher.py list
+python agent/worker_dispatcher.py dispatch --worker-id worker-a --max-runs 5
+```
+
+Capabilities:
+
+- enqueue request/report into selected run store
+- list queued runs
+- claim one queued run using worker lease
+- execute the run through `run_agent_once(...)`
+- release the worker lease
+- dispatch multiple runs with `dispatch_loop(...)`
+- track queue attempts
+- mark dead-letter runs as failed after max attempts
+
+This is a cooperative dispatcher and local queue abstraction, not an external queue service.
 
 ## Postgres connection profile
 
@@ -166,23 +135,15 @@ FOUNDATION_AGENT_RUN_POSTGRES_POOL_TIMEOUT=30
 
 When pool mode is enabled, `PostgresRunStore` lazily creates a `psycopg_pool.ConnectionPool`. Call `close()` during shutdown to close the pool.
 
-Core CI imports the module without installing Postgres dependencies and does not connect to a database. Real DB behavior is DSN-gated in the optional Postgres profile.
-
 ## CI profiles
 
-Core CI does not install Postgres dependencies and does not connect to a database.
+Core CI includes dispatcher tests and does not install Postgres dependencies.
 
 Optional profile:
 
 ```bash
 python scripts/ci_profiles.py --profile postgres-run-store
 python -m unittest tests.test_postgres_run_store_contract
-```
-
-Standalone workflow:
-
-```text
-.github/workflows/foundation-postgres-run-store.yml
 ```
 
 The real database contract test is skipped unless `FOUNDATION_AGENT_RUN_POSTGRES_DSN` is configured.
@@ -207,35 +168,16 @@ Endpoints using the selected store:
 - `POST /v1/agent/retry`
 - `POST /v1/agent/resume`
 
-## Worker leases
-
-Rules:
-
-- one active lease per run
-- same worker can renew
-- another worker can claim only after expiration or release
-- expired leases are discoverable
-- status includes `worker_lease`
-
-File mode writes `worker_lease.json`; SQLite writes `run_leases`; Postgres writes `run_leases` and uses row locks.
-
-## Safety
-
-`safe_run_id()` rejects empty ids, path separators and `..`.
-
 ## Current limitations
 
-- Postgres migration runner exists, but schema version tracking is not implemented yet.
 - Connection pool config exists, but there is no full production deployment profile or health-check endpoint yet.
-- Real Postgres tests require external DSN configuration and are not part of default core CI.
-- Worker leases are still cooperative and not a full task queue.
+- Worker dispatcher is cooperative and not an external distributed queue service.
 - Runtime still writes compatibility file artifacts.
 - SSE is polling-based, not WebSocket or push event infrastructure.
-- No full distributed worker scheduler yet.
+- No cross-service distributed scheduler yet.
 
 ## Next steps
 
-- Add schema version tracking and migration history table.
 - Add production deployment profile and pool health checks.
-- Add full worker queue/dispatcher semantics on top of leases.
+- Add dashboard/observability for queue lag, failed runs and worker health.
 - Add richer query indexes and retention policies.
