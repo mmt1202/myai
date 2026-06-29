@@ -42,6 +42,7 @@ PROFILES: dict[str, CIProfile] = {
             "tests.test_sqlite_run_store",
             "tests.test_agent_lifecycle",
             "tests.test_worker_dispatcher",
+            "tests.test_postgres_migration_history",
             "tests.test_workspace_quota",
             "tests.test_quota_store",
             "tests.test_skill_registry",
