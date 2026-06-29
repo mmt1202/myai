@@ -172,8 +172,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Manage Agent run lifecycle through the configured run store: status, cancel, retry, resume and worker leases.")
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--output-root", default="outputs/agent_runtime/api")
-    parser.add_argument("--run-store", choices=["file", "sqlite", "sqlite3"], default="file")
+    parser.add_argument("--run-store", choices=["file", "sqlite", "sqlite3", "postgres", "postgresql", "pg"], default="file")
     parser.add_argument("--sqlite-path", default=None, help="SQLite run store path. Defaults to <output-root>/runs.sqlite when --run-store sqlite is used.")
+    parser.add_argument("--postgres-dsn", default=None, help="Postgres DSN for --run-store postgres. If omitted, FOUNDATION_AGENT_RUN_POSTGRES_DSN is used by the scaffold.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     status_parser = sub.add_parser("status")
@@ -214,7 +215,7 @@ def main() -> int:
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
     output_root = Path(args.output_root)
-    store = build_run_store(args.run_store, output_root, sqlite_path=Path(args.sqlite_path) if args.sqlite_path else None)
+    store = build_run_store(args.run_store, output_root, sqlite_path=Path(args.sqlite_path) if args.sqlite_path else None, postgres_dsn=args.postgres_dsn)
     if args.command == "status":
         result = status_run(output_root, args.run_id, store)
     elif args.command == "cancel":
