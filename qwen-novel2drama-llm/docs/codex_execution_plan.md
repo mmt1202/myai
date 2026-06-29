@@ -29,7 +29,7 @@ Txxx: <short English summary>
 ```bash
 python scripts/check_openapi_contract.py
 python -m unittest tests.test_openapi_contract_check tests.test_foundation_contracts
-python -m unittest tests.test_foundation_core_services tests.test_memory_store tests.test_rule_engine tests.test_auth_service tests.test_auth_audit_rate_limit tests.test_usage_reconciliation tests.test_model_tool_loop_usage tests.test_provider_continuation tests.test_run_store tests.test_sqlite_run_store tests.test_agent_events tests.test_ci_profiles tests.test_workspace_quota tests.test_quota_store tests.test_skill_registry tests.test_mcp_adapter
+python -m unittest tests.test_foundation_core_services tests.test_memory_store tests.test_rule_engine tests.test_auth_service tests.test_auth_audit_rate_limit tests.test_usage_reconciliation tests.test_model_tool_loop_usage tests.test_provider_continuation tests.test_run_store tests.test_sqlite_run_store tests.test_agent_lifecycle tests.test_agent_events tests.test_ci_profiles tests.test_workspace_quota tests.test_quota_store tests.test_skill_registry tests.test_mcp_adapter
 ```
 
 如果改到 API server，再跑：
@@ -44,7 +44,7 @@ python -m unittest tests.test_api_server_foundation
 python -m unittest tests.test_agent_runtime tests.test_agent_lifecycle tests.test_agent_events tests.test_agent_tool_loop tests.test_run_store tests.test_sqlite_run_store
 ```
 
-禁止误判：RunStore/SQLite/API/run listing/DB-backed events/SQLite quota backend 都是阶段性能力，不等于 Postgres、分布式任务队列、分布式事件总线、WebSocket、全文搜索、全局限流或生产级调度已完成。
+禁止误判：RunStore/SQLite/API/run listing/DB-backed events/SQLite quota backend/worker lease 都是阶段性能力，不等于 Postgres、分布式任务队列、分布式事件总线、WebSocket、全文搜索、全局限流或生产级调度已完成。
 
 ---
 
@@ -62,6 +62,7 @@ P1_auth_api_key_workspace_scope_implemented_v1 = true
 P1_auth_audit_rate_limit_implemented_v1 = true
 P1_workspace_budget_quota_implemented_v1 = true
 P1_sqlite_quota_rate_limit_backend_implemented_v1 = true
+P1_agent_worker_lease_implemented_v1 = true
 P1_agent_lifecycle_resume_cancel_retry_implemented_v1 = true
 P1_agent_lifecycle_api_endpoints_implemented_v1 = true
 P1_agent_run_store_abstraction_implemented_v1 = true
@@ -171,28 +172,9 @@ P1_sqlite_quota_rate_limit_backend_implemented_v1 = true
 
 ## T007：Worker lease / claim run v1
 
-目标：为分布式 Agent worker 打基础，支持 run claim 和 lease。
+状态：**已完成**。
 
-功能：
-
-```text
-claim_run(run_id, worker_id, lease_seconds)
-renew_lease(run_id, worker_id)
-release_run(run_id, worker_id)
-find_expired_leases()
-```
-
-建议文件：
-
-```text
-agent/run_store.py
-agent/sqlite_run_store.py
-agent/lifecycle.py
-tests/test_sqlite_run_store.py
-tests/test_agent_lifecycle.py
-docs/p1_agent_run_store.md
-docs/implementation_status.md
-```
+完成内容：`RunStore.claim_run(...)`、`renew_lease(...)`、`release_run(...)`、`find_expired_leases(...)`、FileRunStore `worker_lease.json` 兼容实现、SQLiteRunStore `run_leases` 表、lifecycle CLI `claim/renew-lease/release/expired-leases`、测试、文档、状态同步。
 
 状态标记：
 
@@ -200,7 +182,7 @@ docs/implementation_status.md
 P1_agent_worker_lease_implemented_v1 = true
 ```
 
-边界：完成后仍不是完整任务队列，只是 worker lease 基础。
+边界：Worker lease 完成不等于完整任务队列、分布式调度器或自动 worker pool 完成。
 
 ---
 
