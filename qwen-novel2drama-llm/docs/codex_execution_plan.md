@@ -44,7 +44,7 @@ python -m unittest tests.test_api_server_foundation
 python -m unittest tests.test_agent_runtime tests.test_agent_lifecycle tests.test_agent_events tests.test_agent_tool_loop tests.test_run_store tests.test_sqlite_run_store
 ```
 
-禁止误判：RunStore/SQLite/API/run listing/DB-backed events/SQLite quota backend/worker lease 都是阶段性能力，不等于 Postgres、分布式任务队列、分布式事件总线、WebSocket、全文搜索、全局限流或生产级调度已完成。
+禁止误判：RunStore/SQLite/API/run listing/DB-backed events/SQLite quota backend/worker lease/Postgres scaffold 都是阶段性能力，不等于真实 Postgres persistence、分布式任务队列、分布式事件总线、WebSocket、全文搜索、全局限流或生产级调度已完成。
 
 ---
 
@@ -63,6 +63,7 @@ P1_auth_audit_rate_limit_implemented_v1 = true
 P1_workspace_budget_quota_implemented_v1 = true
 P1_sqlite_quota_rate_limit_backend_implemented_v1 = true
 P1_agent_worker_lease_implemented_v1 = true
+P1_postgres_run_store_scaffold_implemented_v1 = true
 P1_agent_lifecycle_resume_cancel_retry_implemented_v1 = true
 P1_agent_lifecycle_api_endpoints_implemented_v1 = true
 P1_agent_run_store_abstraction_implemented_v1 = true
@@ -188,19 +189,9 @@ P1_agent_worker_lease_implemented_v1 = true
 
 ## T008：PostgresRunStore interface scaffold v1
 
-目标：增加 Postgres run store 接口骨架和配置选择，但不要求在 core CI 连接真实 Postgres。
+状态：**已完成**。
 
-建议文件：
-
-```text
-agent/postgres_run_store.py
-agent/run_store.py
-agent/lifecycle.py
-inference/api_server.py
-tests/test_run_store.py
-docs/p1_agent_run_store.md
-docs/implementation_status.md
-```
+完成内容：`agent/postgres_run_store.py`、`PostgresRunStore` scaffold、`build_run_store("postgres")`、`--run-store postgres`、`FOUNDATION_AGENT_RUN_POSTGRES_DSN` 配置入口、dependency-free scaffold 测试、文档、状态同步。
 
 状态标记：
 
@@ -208,13 +199,47 @@ docs/implementation_status.md
 P1_postgres_run_store_scaffold_implemented_v1 = true
 ```
 
-边界：scaffold 完成不等于真实生产 Postgres 部署完成。
+边界：scaffold 完成不等于真实 Postgres persistence、migration、连接池或生产部署完成。
+
+---
+
+## T009：Real PostgresRunStore persistence v1
+
+目标：把 T008 scaffold 变成真实 Postgres 持久化实现。
+
+建议文件：
+
+```text
+agent/postgres_run_store.py
+requirements/postgres-run-store.txt
+.github/workflows/foundation-optional-profiles.yml
+scripts/ci_profiles.py
+tests/test_postgres_run_store_contract.py
+docs/p1_agent_run_store.md
+docs/implementation_status.md
+```
+
+验收标准：
+
+- 使用可选依赖 profile，不进入 core CI。
+- 支持 requests/reports/events/cancel/artifact/lease 读写。
+- 支持 list_runs filters/pagination。
+- 支持 claim/renew/release 的数据库级原子语义。
+- 没有 DSN 时测试自动 skip 或只跑 contract double。
+
+状态标记：
+
+```text
+P1_postgres_run_store_persistence_implemented_v1 = true
+```
+
+边界：真实 Postgres store 完成不等于完整 worker queue 或全生产部署完成。
 
 ---
 
 # Phase C：Provider 原生能力
 
-## T009：provider-native bidirectional continuation adapter v1
+## T010：provider-native bidirectional continuation adapter v1
 
 目标：实现真正 provider-native same-stream tool result continuation 的第一个 adapter。
 
