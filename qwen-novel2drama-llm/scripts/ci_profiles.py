@@ -31,6 +31,7 @@ PROFILES: dict[str, CIProfile] = {
         requirements=("requirements/ci-core.txt",),
         tests=(
             "tests.test_foundation_core_services",
+            "tests.test_model_versions",
             "tests.test_api_smoke",
             "tests.test_memory_store",
             "tests.test_rule_engine",
