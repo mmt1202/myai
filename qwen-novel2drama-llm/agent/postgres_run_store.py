@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from agent.events import normalize_event, summarize_agent_events
 from agent.run_store import RunNotFoundError, RunStore, RunStoreError, lease_is_expired, paginate_run_summaries, run_summary_from_report, run_summary_matches_filters, utc_now, worker_lease_marker
 from agent.runtime import now_iso
 
 DEFAULT_POSTGRES_RUN_STORE_DSN_ENV = "FOUNDATION_AGENT_RUN_POSTGRES_DSN"
+POSTGRES_RUN_STORE_POOL_ENABLED_ENV = "FOUNDATION_AGENT_RUN_POSTGRES_POOL_ENABLED"
+POSTGRES_RUN_STORE_POOL_MIN_ENV = "FOUNDATION_AGENT_RUN_POSTGRES_POOL_MIN"
+POSTGRES_RUN_STORE_POOL_MAX_ENV = "FOUNDATION_AGENT_RUN_POSTGRES_POOL_MAX"
+POSTGRES_RUN_STORE_POOL_TIMEOUT_ENV = "FOUNDATION_AGENT_RUN_POSTGRES_POOL_TIMEOUT"
 POSTGRES_RUN_STORE_REQUIRED_TABLES = ["runs", "run_requests", "run_reports", "run_events", "cancel_requests", "run_artifacts", "run_leases"]
 
 POSTGRES_RUN_STORE_SCHEMA_SQL = """
@@ -69,11 +75,101 @@ class PostgresRunStoreUnavailable(RunStoreError):
     pass
 
 
+@dataclass(frozen=True)
+class PostgresConnectionProfile:
+    pool_enabled: bool = False
+    pool_min_size: int = 1
+    pool_max_size: int = 5
+    pool_timeout: float = 30.0
+
+    @classmethod
+    def from_env(cls) -> "PostgresConnectionProfile":
+        return cls(
+            pool_enabled=bool_from_env(POSTGRES_RUN_STORE_POOL_ENABLED_ENV, False),
+            pool_min_size=int_from_env(POSTGRES_RUN_STORE_POOL_MIN_ENV, 1),
+            pool_max_size=int_from_env(POSTGRES_RUN_STORE_POOL_MAX_ENV, 5),
+            pool_timeout=float_from_env(POSTGRES_RUN_STORE_POOL_TIMEOUT_ENV, 30.0),
+        )
+
+    def normalized(self) -> "PostgresConnectionProfile":
+        min_size = max(1, int(self.pool_min_size))
+        max_size = max(min_size, int(self.pool_max_size))
+        timeout = max(1.0, float(self.pool_timeout))
+        return PostgresConnectionProfile(pool_enabled=bool(self.pool_enabled), pool_min_size=min_size, pool_max_size=max_size, pool_timeout=timeout)
+
+
+def bool_from_env(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def int_from_env(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def float_from_env(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def split_sql_statements(sql: str) -> list[str]:
+    statements: list[str] = []
+    current: list[str] = []
+    in_single_quote = False
+    in_double_quote = False
+    previous = ""
+    for char in sql:
+        if char == "'" and previous != "\\" and not in_double_quote:
+            in_single_quote = not in_single_quote
+        elif char == '"' and previous != "\\" and not in_single_quote:
+            in_double_quote = not in_double_quote
+        if char == ";" and not in_single_quote and not in_double_quote:
+            statement = "".join(current).strip()
+            if statement:
+                statements.append(statement)
+            current = []
+        else:
+            current.append(char)
+        previous = char
+    tail = "".join(current).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+def load_schema_sql(path: Path | str | None = None) -> str:
+    if path is None:
+        return POSTGRES_RUN_STORE_SCHEMA_SQL
+    return Path(path).read_text(encoding="utf-8")
+
+
+def apply_schema_sql(conn: Any, sql: str) -> int:
+    statements = split_sql_statements(sql)
+    with conn.cursor() as cur:
+        for statement in statements:
+            cur.execute(statement)
+    conn.commit()
+    return len(statements)
+
+
 class PostgresRunStore(RunStore):
     """Postgres-backed Agent run store.
 
-    The dependency on psycopg is optional. Core tests can import this module without
-    installing the Postgres profile; real operations require psycopg and a DSN.
+    psycopg and psycopg_pool are optional. Core tests can import this module without
+    installing the Postgres profile; real operations require the optional profile and a DSN.
     """
 
     def __init__(
@@ -84,12 +180,15 @@ class PostgresRunStore(RunStore):
         connect: bool = False,
         auto_init: bool = False,
         connect_factory: Callable[[str], Any] | None = None,
+        connection_profile: PostgresConnectionProfile | None = None,
     ) -> None:
         self.dsn = dsn or os.environ.get(DEFAULT_POSTGRES_RUN_STORE_DSN_ENV) or ""
         self.output_root = Path(output_root or "outputs/agent_runtime/postgres")
         self.connect = bool(connect)
         self.auto_init = bool(auto_init)
         self.connect_factory = connect_factory
+        self.connection_profile = (connection_profile or PostgresConnectionProfile.from_env()).normalized()
+        self._pool: Any | None = None
         if self.connect and self.auto_init:
             self.init_db()
 
@@ -112,11 +211,43 @@ class PostgresRunStore(RunStore):
             raise PostgresRunStoreUnavailable(f"Postgres DSN is not configured; set {DEFAULT_POSTGRES_RUN_STORE_DSN_ENV} or pass postgres_dsn")
         return self._psycopg_connect_factory()(self.dsn)
 
-    def init_db(self) -> None:
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(POSTGRES_RUN_STORE_SCHEMA_SQL)
-            conn.commit()
+    def _connection_pool(self) -> Any:
+        if not self.dsn:
+            raise PostgresRunStoreUnavailable(f"Postgres DSN is not configured; set {DEFAULT_POSTGRES_RUN_STORE_DSN_ENV} or pass postgres_dsn")
+        if self._pool is None:
+            try:
+                from psycopg.rows import dict_row
+                from psycopg_pool import ConnectionPool
+            except Exception as exc:  # noqa: BLE001
+                raise PostgresRunStoreUnavailable("psycopg_pool is not installed; install requirements/postgres-run-store.txt before enabling the Postgres connection pool") from exc
+            self._pool = ConnectionPool(
+                conninfo=self.dsn,
+                min_size=self.connection_profile.pool_min_size,
+                max_size=self.connection_profile.pool_max_size,
+                timeout=self.connection_profile.pool_timeout,
+                kwargs={"row_factory": dict_row},
+            )
+        return self._pool
+
+    @contextmanager
+    def _connection(self) -> Iterator[Any]:
+        if self.connection_profile.pool_enabled and self.connect_factory is None:
+            with self._connection_pool().connection() as conn:
+                yield conn
+        else:
+            with self._connect() as conn:
+                yield conn
+
+    def close(self) -> None:
+        if self._pool is not None:
+            self._pool.close()
+            self._pool = None
+
+    def init_db(self, *, sql: str | None = None, sql_path: Path | str | None = None) -> dict[str, Any]:
+        selected_sql = sql if sql is not None else load_schema_sql(sql_path)
+        with self._connection() as conn:
+            statement_count = apply_schema_sql(conn, selected_sql)
+        return {"status": "ok", "statement_count": statement_count, "run_store": self.metadata()}
 
     def safe_run_id(self, run_id: str) -> str:
         value = str(run_id or "").strip()
@@ -162,7 +293,7 @@ class PostgresRunStore(RunStore):
 
     def load_request(self, run_id: str) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT request_json FROM run_requests WHERE run_id = %s", (safe_id,))
                 row = cur.fetchone()
@@ -172,7 +303,7 @@ class PostgresRunStore(RunStore):
 
     def save_request(self, run_id: str, request: dict[str, Any]) -> Path:
         safe_id = self.safe_run_id(run_id)
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 self._ensure_run(cur, safe_id, status=request.get("status") or "created", created_at=request.get("created_at"), updated_at=request.get("updated_at"))
                 cur.execute("INSERT INTO run_requests(run_id, request_json) VALUES(%s, %s::jsonb) ON CONFLICT(run_id) DO UPDATE SET request_json=EXCLUDED.request_json", (safe_id, self._json(request)))
@@ -181,7 +312,7 @@ class PostgresRunStore(RunStore):
 
     def load_report(self, run_id: str) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT report_json FROM run_reports WHERE run_id = %s", (safe_id,))
                 row = cur.fetchone()
@@ -191,7 +322,7 @@ class PostgresRunStore(RunStore):
 
     def save_report(self, run_id: str, report: dict[str, Any]) -> Path:
         safe_id = self.safe_run_id(run_id)
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 self._ensure_run(cur, safe_id, status=report.get("status"), error=report.get("error"), completed_at=report.get("completed_at"), created_at=report.get("created_at"), updated_at=report.get("updated_at"))
                 cur.execute("INSERT INTO run_reports(run_id, report_json) VALUES(%s, %s::jsonb) ON CONFLICT(run_id) DO UPDATE SET report_json=EXCLUDED.report_json", (safe_id, self._json(report)))
@@ -201,7 +332,7 @@ class PostgresRunStore(RunStore):
     def append_event(self, run_id: str, event: dict[str, Any]) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
         normalized = normalize_event({**event, "run_id": event.get("run_id") or safe_id})
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 self._ensure_run(cur, safe_id, status=normalized.get("status"))
                 cur.execute(
@@ -221,7 +352,7 @@ class PostgresRunStore(RunStore):
 
     def load_events(self, run_id: str) -> list[dict[str, Any]]:
         safe_id = self.safe_run_id(run_id)
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 self._require_run(cur, safe_id)
                 cur.execute("SELECT event_json FROM run_events WHERE run_id = %s ORDER BY created_at, event_id", (safe_id,))
@@ -232,7 +363,7 @@ class PostgresRunStore(RunStore):
 
     def load_cancel_request(self, run_id: str) -> dict[str, Any] | None:
         safe_id = self.safe_run_id(run_id)
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT marker_json FROM cancel_requests WHERE run_id = %s", (safe_id,))
                 row = cur.fetchone()
@@ -241,7 +372,7 @@ class PostgresRunStore(RunStore):
     def save_cancel_request(self, run_id: str, marker: dict[str, Any]) -> Path:
         safe_id = self.safe_run_id(run_id)
         created_at = marker.get("created_at") or now_iso()
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 self._ensure_run(cur, safe_id, status="cancel_requested", updated_at=created_at)
                 cur.execute("INSERT INTO cancel_requests(run_id, marker_json, created_at) VALUES(%s, %s::jsonb, %s) ON CONFLICT(run_id) DO UPDATE SET marker_json=EXCLUDED.marker_json, created_at=EXCLUDED.created_at", (safe_id, self._json(marker), created_at))
@@ -250,14 +381,14 @@ class PostgresRunStore(RunStore):
 
     def cancel_requested(self, run_id: str) -> bool:
         safe_id = self.safe_run_id(run_id)
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT 1 FROM cancel_requests WHERE run_id = %s", (safe_id,))
                 return cur.fetchone() is not None
 
     def save_artifact(self, run_id: str, name: str, artifact: dict[str, Any], *, path: str | None = None) -> Path:
         safe_id = self.safe_run_id(run_id)
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 self._ensure_run(cur, safe_id)
                 cur.execute("INSERT INTO run_artifacts(run_id, name, path, artifact_json) VALUES(%s, %s, %s, %s::jsonb) ON CONFLICT(run_id, name) DO UPDATE SET path=EXCLUDED.path, artifact_json=EXCLUDED.artifact_json", (safe_id, name, path, self._json(artifact)))
@@ -278,7 +409,7 @@ class PostgresRunStore(RunStore):
         order: str | None = None,
     ) -> dict[str, Any]:
         summaries: list[dict[str, Any]] = []
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT * FROM runs")
                 rows = cur.fetchall()
@@ -308,7 +439,7 @@ class PostgresRunStore(RunStore):
 
     def load_worker_lease(self, run_id: str) -> dict[str, Any] | None:
         safe_id = self.safe_run_id(run_id)
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT lease_json FROM run_leases WHERE run_id = %s", (safe_id,))
                 row = cur.fetchone()
@@ -332,7 +463,7 @@ class PostgresRunStore(RunStore):
     def claim_run(self, run_id: str, worker_id: str, *, lease_seconds: int = 60, now: datetime | None = None) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
         current = now or utc_now()
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 self._require_run(cur, safe_id)
                 cur.execute("SELECT lease_json FROM run_leases WHERE run_id = %s FOR UPDATE", (safe_id,))
@@ -351,7 +482,7 @@ class PostgresRunStore(RunStore):
     def renew_lease(self, run_id: str, worker_id: str, *, lease_seconds: int = 60, now: datetime | None = None) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
         current = now or utc_now()
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 self._require_run(cur, safe_id)
                 cur.execute("SELECT lease_json FROM run_leases WHERE run_id = %s FOR UPDATE", (safe_id,))
@@ -375,7 +506,7 @@ class PostgresRunStore(RunStore):
     def release_run(self, run_id: str, worker_id: str, *, now: datetime | None = None) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
         current = now or utc_now()
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 self._require_run(cur, safe_id)
                 cur.execute("SELECT lease_json FROM run_leases WHERE run_id = %s FOR UPDATE", (safe_id,))
@@ -394,7 +525,7 @@ class PostgresRunStore(RunStore):
 
     def find_expired_leases(self, *, now: datetime | None = None) -> list[dict[str, Any]]:
         current = now or utc_now()
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT lease_json FROM run_leases WHERE status = 'claimed' ORDER BY lease_expires_at")
                 rows = cur.fetchall()
@@ -407,7 +538,7 @@ class PostgresRunStore(RunStore):
 
     def status(self, run_id: str) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
-        with self._connect() as conn:
+        with self._connection() as conn:
             with conn.cursor() as cur:
                 row = self._require_run(cur, safe_id)
                 cur.execute("SELECT name, path, artifact_json FROM run_artifacts WHERE run_id = %s ORDER BY name", (safe_id,))
@@ -420,8 +551,25 @@ class PostgresRunStore(RunStore):
         return {"run_id": safe_id, "status": report.get("status") or row.get("status"), "error": report.get("error") or row.get("error"), "created_at": report.get("created_at") or row.get("created_at"), "updated_at": report.get("updated_at") or row.get("updated_at"), "completed_at": report.get("completed_at") or row.get("completed_at"), "cancel_requested": self.cancel_requested(safe_id), "worker_lease": self.load_worker_lease(safe_id), "artifacts": artifacts, "event_summary": self.event_summary(safe_id), "run_store": self.metadata()}
 
     def metadata(self) -> dict[str, Any]:
-        return {"type": "postgres", "dsn_configured": bool(self.dsn), "dsn_env": DEFAULT_POSTGRES_RUN_STORE_DSN_ENV, "output_root": str(self.output_root), "connect_on_init": self.connect, "auto_init": self.auto_init, "implementation_status": "persistence_v1"}
+        return {
+            "type": "postgres",
+            "dsn_configured": bool(self.dsn),
+            "dsn_env": DEFAULT_POSTGRES_RUN_STORE_DSN_ENV,
+            "output_root": str(self.output_root),
+            "connect_on_init": self.connect,
+            "auto_init": self.auto_init,
+            "implementation_status": "persistence_v1",
+            "connection_profile": asdict(self.connection_profile),
+        }
 
 
-def postgres_run_store(dsn: str | None = None, *, output_root: Path | str | None = None, connect: bool = False, auto_init: bool = False, connect_factory: Callable[[str], Any] | None = None) -> PostgresRunStore:
-    return PostgresRunStore(dsn, output_root=output_root, connect=connect, auto_init=auto_init, connect_factory=connect_factory)
+def postgres_run_store(
+    dsn: str | None = None,
+    *,
+    output_root: Path | str | None = None,
+    connect: bool = False,
+    auto_init: bool = False,
+    connect_factory: Callable[[str], Any] | None = None,
+    connection_profile: PostgresConnectionProfile | None = None,
+) -> PostgresRunStore:
+    return PostgresRunStore(dsn, output_root=output_root, connect=connect, auto_init=auto_init, connect_factory=connect_factory, connection_profile=connection_profile)
