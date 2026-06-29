@@ -1,0 +1,38 @@
+name: provider-smoke-tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_real_provider:
+        description: "Enable real provider smoke tests"
+        required: false
+        default: "false"
+
+jobs:
+  provider-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements/provider-smoke.txt || true
+
+      - name: Run provider smoke tests (gated)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.run_real_provider }}" != "true" ]; then
+            echo "Skipping real provider smoke tests"
+            exit 0
+          fi
+          python scripts/provider_smoke_test.py
