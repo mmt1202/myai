@@ -4,6 +4,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -28,7 +29,7 @@ class SQLiteRunStoreTests(unittest.TestCase):
             sqlite_run_store(db_path)
             with sqlite3.connect(db_path) as conn:
                 tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-            self.assertGreaterEqual(tables, {"runs", "run_requests", "run_reports", "run_events", "cancel_requests", "run_artifacts"})
+            self.assertGreaterEqual(tables, {"runs", "run_requests", "run_reports", "run_events", "cancel_requests", "run_artifacts", "run_leases"})
 
     def test_request_and_report_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -77,6 +78,51 @@ class SQLiteRunStoreTests(unittest.TestCase):
             store = sqlite_run_store(Path(tmpdir) / "runs.sqlite3")
             store.save_artifact("demo", "usage.json", {"tokens": 3})
             self.assertEqual(store.status("demo")["artifacts"], {"usage.json": {"tokens": 3}})
+
+    def test_sqlite_worker_lease_claim_renew_release(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = sqlite_run_store(Path(tmpdir) / "runs.sqlite3")
+            store.save_report("demo", {"run_id": "demo", "status": "running", "artifacts": {}})
+            at = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+
+            claim = store.claim_run("demo", "worker-a", lease_seconds=30, now=at)
+            self.assertTrue(claim["claimed"])
+            self.assertEqual(store.status("demo")["worker_lease"]["worker_id"], "worker-a")
+
+            blocked = store.claim_run("demo", "worker-b", lease_seconds=30, now=at + timedelta(seconds=10))
+            self.assertFalse(blocked["claimed"])
+            self.assertEqual(blocked["reason"], "already_claimed")
+
+            renewed = store.renew_lease("demo", "worker-a", lease_seconds=60, now=at + timedelta(seconds=10))
+            self.assertTrue(renewed["renewed"])
+            self.assertEqual(renewed["lease"]["claimed_at"], claim["lease"]["claimed_at"])
+
+            wrong_release = store.release_run("demo", "worker-b", now=at + timedelta(seconds=15))
+            self.assertFalse(wrong_release["released"])
+            self.assertEqual(wrong_release["reason"], "worker_mismatch")
+
+            released = store.release_run("demo", "worker-a", now=at + timedelta(seconds=20))
+            self.assertTrue(released["released"])
+            self.assertEqual(store.load_worker_lease("demo")["status"], "released")
+
+    def test_sqlite_expired_lease_can_be_reclaimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = sqlite_run_store(Path(tmpdir) / "runs.sqlite3")
+            store.save_report("demo", {"run_id": "demo", "status": "running", "artifacts": {}})
+            at = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+            store.claim_run("demo", "worker-a", lease_seconds=5, now=at)
+            expired = store.find_expired_leases(now=at + timedelta(seconds=6))
+            self.assertEqual(len(expired), 1)
+            self.assertEqual(expired[0]["run_id"], "demo")
+            reclaimed = store.claim_run("demo", "worker-b", lease_seconds=30, now=at + timedelta(seconds=6))
+            self.assertTrue(reclaimed["claimed"])
+            self.assertEqual(reclaimed["lease"]["worker_id"], "worker-b")
+
+    def test_sqlite_claim_missing_run_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = sqlite_run_store(Path(tmpdir) / "runs.sqlite3")
+            with self.assertRaises(RunNotFoundError):
+                store.claim_run("missing", "worker-a")
 
     def test_list_runs_filters_orders_and_paginates(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
