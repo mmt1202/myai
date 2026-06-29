@@ -50,9 +50,15 @@ PROFILES: dict[str, CIProfile] = {
     ),
     "provider-adapter": CIProfile(
         name="provider-adapter",
-        description="Provider adapter contract tests that should not require real provider credentials.",
+        description="Provider adapter contract tests without live provider calls.",
         requirements=("requirements/provider-adapter.txt",),
         tests=("tests.test_provider_adapter_contract", "tests.test_provider_factory", "tests.test_provider_continuation"),
+    ),
+    "provider-smoke": CIProfile(
+        name="provider-smoke",
+        description="Optional provider smoke configuration tests. Live calls are environment-gated.",
+        requirements=("requirements/provider-smoke.txt",),
+        tests=("tests.test_provider_smoke_config",),
     ),
     "api-server": CIProfile(
         name="api-server",
@@ -62,7 +68,7 @@ PROFILES: dict[str, CIProfile] = {
     ),
     "postgres-run-store": CIProfile(
         name="postgres-run-store",
-        description="Optional Postgres run store contract tests. Real DB tests are secret/DSN gated.",
+        description="Optional Postgres run store contract tests. Real DB tests are DSN gated.",
         requirements=("requirements/postgres-run-store.txt",),
         tests=("tests.test_postgres_run_store_contract",),
     ),
@@ -85,7 +91,7 @@ PROFILES: dict[str, CIProfile] = {
 
 PROFILE_GROUPS: dict[str, tuple[str, ...]] = {
     "default": ("contracts", "core"),
-    "optional": ("provider-adapter", "api-server", "postgres-run-store", "local-provider-contract"),
+    "optional": ("provider-adapter", "provider-smoke", "api-server", "postgres-run-store", "local-provider-contract"),
     "heavyweight": ("local-model-imports",),
     "all": tuple(PROFILES),
 }
