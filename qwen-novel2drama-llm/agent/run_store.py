@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ REQUEST_FILENAME = "agent_request.json"
 REPORT_FILENAME = "agent_run_report.json"
 EVENTS_FILENAME = "events.jsonl"
 RUN_CREATED_FILENAME = "agent_run_created.json"
+WORKER_LEASE_FILENAME = "worker_lease.json"
 DEFAULT_SQLITE_RUN_DB = "runs.sqlite"
 RUN_LIST_DEFAULT_LIMIT = 50
 RUN_LIST_MAX_LIMIT = 200
@@ -26,6 +28,51 @@ class RunNotFoundError(FileNotFoundError):
     def __init__(self, run_id: str) -> None:
         super().__init__(run_id)
         self.run_id = run_id
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def normalize_lease_seconds(value: int | None) -> int:
+    if value is None:
+        return 60
+    return max(1, int(value))
+
+
+def lease_is_expired(lease: dict[str, Any] | None, *, at: datetime | None = None) -> bool:
+    if not lease:
+        return True
+    expires_at = parse_iso_datetime(lease.get("lease_expires_at"))
+    if expires_at is None:
+        return True
+    return expires_at <= (at or utc_now())
+
+
+def worker_lease_marker(run_id: str, worker_id: str, *, lease_seconds: int, at: datetime | None = None) -> dict[str, Any]:
+    current = at or utc_now()
+    seconds = normalize_lease_seconds(lease_seconds)
+    return {
+        "run_id": run_id,
+        "worker_id": str(worker_id),
+        "claimed_at": current.isoformat(),
+        "renewed_at": current.isoformat(),
+        "lease_seconds": seconds,
+        "lease_expires_at": (current + timedelta(seconds=seconds)).isoformat(),
+        "status": "claimed",
+    }
 
 
 def normalize_list_limit(limit: int | None) -> int:
@@ -78,13 +125,7 @@ def run_summary_matches_filters(
     parent_run_id: str | None = None,
     query: str | None = None,
 ) -> bool:
-    filters = {
-        "status": status,
-        "owner_id": owner_id,
-        "project_id": project_id,
-        "workspace_id": workspace_id,
-        "parent_run_id": parent_run_id,
-    }
+    filters = {"status": status, "owner_id": owner_id, "project_id": project_id, "workspace_id": workspace_id, "parent_run_id": parent_run_id}
     for key, value in filters.items():
         if value is not None and str(summary.get(key) or "") != str(value):
             return False
@@ -101,13 +142,7 @@ def paginate_run_summaries(runs: list[dict[str, Any]], *, limit: int | None = No
     normalized_order = normalize_sort_order(order)
     reverse = normalized_order == "desc"
     sorted_runs = sorted(runs, key=lambda item: item.get("updated_at") or item.get("created_at") or "", reverse=reverse)
-    return {
-        "runs": sorted_runs[normalized_offset : normalized_offset + normalized_limit],
-        "total": len(sorted_runs),
-        "limit": normalized_limit,
-        "offset": normalized_offset,
-        "order": normalized_order,
-    }
+    return {"runs": sorted_runs[normalized_offset : normalized_offset + normalized_limit], "total": len(sorted_runs), "limit": normalized_limit, "offset": normalized_offset, "order": normalized_order}
 
 
 class RunStore(ABC):
@@ -177,6 +212,22 @@ class RunStore(ABC):
         offset: int | None = None,
         order: str | None = None,
     ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def claim_run(self, run_id: str, worker_id: str, *, lease_seconds: int = 60, now: datetime | None = None) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def renew_lease(self, run_id: str, worker_id: str, *, lease_seconds: int = 60, now: datetime | None = None) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def release_run(self, run_id: str, worker_id: str, *, now: datetime | None = None) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def find_expired_leases(self, *, now: datetime | None = None) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     @abstractmethod
@@ -288,6 +339,71 @@ class FileRunStore(RunStore):
         page = paginate_run_summaries(runs, limit=limit, offset=offset, order=order)
         return {**page, "run_store": self.metadata(), "filters": {"status": status, "owner_id": owner_id, "project_id": project_id, "workspace_id": workspace_id, "parent_run_id": parent_run_id, "query": query}}
 
+    def load_worker_lease(self, run_id: str) -> dict[str, Any] | None:
+        path = self.artifact_path(run_id, WORKER_LEASE_FILENAME)
+        if not path.exists():
+            return None
+        return self.load_json(path)
+
+    def save_worker_lease(self, run_id: str, lease: dict[str, Any]) -> Path:
+        return self.save_json(self.artifact_path(run_id, WORKER_LEASE_FILENAME), lease)
+
+    def claim_run(self, run_id: str, worker_id: str, *, lease_seconds: int = 60, now: datetime | None = None) -> dict[str, Any]:
+        safe_id = self.safe_run_id(run_id)
+        self.load_report(safe_id)
+        current = now or utc_now()
+        existing = self.load_worker_lease(safe_id)
+        if existing and not lease_is_expired(existing, at=current) and existing.get("worker_id") != worker_id:
+            return {"claimed": False, "run_id": safe_id, "worker_id": worker_id, "active_lease": existing, "reason": "already_claimed", "run_store": self.metadata()}
+        lease = worker_lease_marker(safe_id, worker_id, lease_seconds=lease_seconds, at=current)
+        self.save_worker_lease(safe_id, lease)
+        return {"claimed": True, "run_id": safe_id, "worker_id": worker_id, "lease": lease, "run_store": self.metadata()}
+
+    def renew_lease(self, run_id: str, worker_id: str, *, lease_seconds: int = 60, now: datetime | None = None) -> dict[str, Any]:
+        safe_id = self.safe_run_id(run_id)
+        current = now or utc_now()
+        existing = self.load_worker_lease(safe_id)
+        if not existing:
+            return {"renewed": False, "run_id": safe_id, "worker_id": worker_id, "reason": "no_active_lease", "run_store": self.metadata()}
+        if existing.get("worker_id") != worker_id:
+            return {"renewed": False, "run_id": safe_id, "worker_id": worker_id, "active_lease": existing, "reason": "worker_mismatch", "run_store": self.metadata()}
+        if lease_is_expired(existing, at=current):
+            return {"renewed": False, "run_id": safe_id, "worker_id": worker_id, "active_lease": existing, "reason": "lease_expired", "run_store": self.metadata()}
+        lease = worker_lease_marker(safe_id, worker_id, lease_seconds=lease_seconds, at=current)
+        lease["claimed_at"] = existing.get("claimed_at") or lease["claimed_at"]
+        self.save_worker_lease(safe_id, lease)
+        return {"renewed": True, "run_id": safe_id, "worker_id": worker_id, "lease": lease, "run_store": self.metadata()}
+
+    def release_run(self, run_id: str, worker_id: str, *, now: datetime | None = None) -> dict[str, Any]:
+        safe_id = self.safe_run_id(run_id)
+        existing = self.load_worker_lease(safe_id)
+        if not existing:
+            return {"released": False, "run_id": safe_id, "worker_id": worker_id, "reason": "no_active_lease", "run_store": self.metadata()}
+        if existing.get("worker_id") != worker_id:
+            return {"released": False, "run_id": safe_id, "worker_id": worker_id, "active_lease": existing, "reason": "worker_mismatch", "run_store": self.metadata()}
+        released = {**existing, "status": "released", "released_at": (now or utc_now()).isoformat()}
+        self.save_worker_lease(safe_id, released)
+        return {"released": True, "run_id": safe_id, "worker_id": worker_id, "lease": released, "run_store": self.metadata()}
+
+    def find_expired_leases(self, *, now: datetime | None = None) -> list[dict[str, Any]]:
+        current = now or utc_now()
+        expired: list[dict[str, Any]] = []
+        if not self.output_root.exists():
+            return expired
+        for child in self.output_root.iterdir():
+            if not child.is_dir():
+                continue
+            path = child / WORKER_LEASE_FILENAME
+            if not path.exists():
+                continue
+            try:
+                lease = self.load_json(path)
+            except Exception:  # noqa: BLE001
+                continue
+            if lease.get("status") == "claimed" and lease_is_expired(lease, at=current):
+                expired.append({**lease, "run_store": self.metadata()})
+        return expired
+
     def status(self, run_id: str) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
         report = self.load_report(safe_id)
@@ -299,6 +415,7 @@ class FileRunStore(RunStore):
             "updated_at": report.get("updated_at"),
             "completed_at": report.get("completed_at"),
             "cancel_requested": self.cancel_requested(safe_id),
+            "worker_lease": self.load_worker_lease(safe_id),
             "artifacts": report.get("artifacts") or {},
             "event_summary": self.event_summary(safe_id),
             "run_store": self.metadata(),
@@ -309,12 +426,7 @@ class FileRunStore(RunStore):
 
 
 def marker_for_cancel(run_id: str, *, reason: str | None = None, requested_by: str | None = None) -> dict[str, Any]:
-    return {
-        "created_at": now_iso(),
-        "run_id": FileRunStore(Path(".")).safe_run_id(run_id),
-        "reason": reason or "cancel_requested",
-        "requested_by": requested_by,
-    }
+    return {"created_at": now_iso(), "run_id": FileRunStore(Path(".")).safe_run_id(run_id), "reason": reason or "cancel_requested", "requested_by": requested_by}
 
 
 def file_run_store(output_root: Path) -> FileRunStore:
@@ -327,13 +439,7 @@ def default_sqlite_path(output_root: Path) -> Path:
 
 def normalize_run_store_kind(kind: str | None) -> str:
     value = str(kind or "file").strip().lower().replace("_", "-")
-    aliases = {
-        "": "file",
-        "file-backed": "file",
-        "file-run-store": "file",
-        "sqlite3": "sqlite",
-        "sqlite-run-store": "sqlite",
-    }
+    aliases = {"": "file", "file-backed": "file", "file-run-store": "file", "sqlite3": "sqlite", "sqlite-run-store": "sqlite"}
     return aliases.get(value, value)
 
 
