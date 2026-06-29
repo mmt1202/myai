@@ -25,6 +25,7 @@ class CIProfilesTests(unittest.TestCase):
         command = unittest_command(profile) or ""
         for test_name in [
             "tests.test_foundation_core_services",
+            "tests.test_model_versions",
             "tests.test_api_smoke",
             "tests.test_provider_catalog_resilience",
             "tests.test_multimodal_router",
