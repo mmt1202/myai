@@ -1,12 +1,14 @@
 # P1 Workspace Budget and Quota
 
-Workspace quota v1 adds a file-backed budget and quota control layer for Agent provider execution.
+Workspace quota v1 adds a budget and quota control layer for Agent provider execution.
 
 Implemented files:
 
 - `configs/auth/workspace_quotas.example.json`
+- `services/quota_store.py`
 - `services/workspace_quota.py`
 - `tests/test_workspace_quota.py`
+- `tests/test_quota_store.py`
 
 Integrated files:
 
@@ -50,6 +52,22 @@ FOUNDATION_WORKSPACE_QUOTAS=configs/auth/workspace_quotas.json
 FOUNDATION_WORKSPACE_QUOTA_STATE=outputs/auth/workspace_quota_state.json
 ```
 
+Quota backend selection:
+
+```text
+FOUNDATION_QUOTA_BACKEND=file|sqlite
+FOUNDATION_QUOTA_DB=outputs/auth/quota.sqlite
+```
+
+Compatibility aliases:
+
+```text
+FOUNDATION_WORKSPACE_QUOTA_BACKEND=file|sqlite
+FOUNDATION_WORKSPACE_QUOTA_DB=outputs/auth/quota.sqlite
+```
+
+Default backend is `file`, which preserves the previous JSON state behavior.
+
 Agent request overrides:
 
 ```json
@@ -84,6 +102,47 @@ default -> workspaces.<workspace_id>
 
 Workspace overrides deep-merge with default limits.
 
+## Quota store backends
+
+`services/quota_store.py` provides the shared backend interface for rate limit and workspace quota counters.
+
+Implemented backends:
+
+```text
+FileQuotaStore
+SQLiteQuotaStore
+```
+
+Factory helpers:
+
+```python
+build_quota_store(kind, rate_limit_state_path=..., workspace_quota_state_path=..., sqlite_path=...)
+quota_store_from_env(rate_limit_state_path=..., workspace_quota_state_path=...)
+```
+
+SQLite tables:
+
+```text
+rate_limit_buckets
+workspace_usage
+workspace_quota_events
+```
+
+Workspace quota uses `workspace_usage` keyed by:
+
+```text
+workspace_id + period_key
+```
+
+Period keys are UTC calendar windows:
+
+```text
+daily:YYYY-MM-DD
+monthly:YYYY-MM
+```
+
+SQLite writes use `BEGIN IMMEDIATE` around counter updates so one process performs the update atomically within SQLite. This is still local-node SQLite, not a distributed quota service.
+
 ## Agent runtime behavior
 
 When quota is enabled, Agent runtime performs:
@@ -94,7 +153,7 @@ When quota is enabled, Agent runtime performs:
 4. deny provider execution if projected usage exceeds configured limits
 5. execute provider if quota allows
 6. reconcile actual provider usage/cost
-7. record actual usage/cost into quota state
+7. record actual usage/cost into quota backend
 8. write `workspace_quota_usage.json`
 
 Denied runs fail with:
@@ -119,7 +178,7 @@ workspace_quota_check.json
 workspace_quota_usage.json
 ```
 
-The quota state stores daily/monthly counters and a bounded recent event list.
+The quota backend stores daily/monthly counters and recent event metadata. In file mode, these remain in JSON state. In SQLite mode, counters go into `workspace_usage` and events go into `workspace_quota_events`.
 
 ## CLI
 
@@ -145,6 +204,18 @@ python services/workspace_quota.py \
   --record
 ```
 
+Use SQLite backend:
+
+```bash
+FOUNDATION_QUOTA_BACKEND=sqlite \
+FOUNDATION_QUOTA_DB=outputs/auth/quota.sqlite \
+python services/workspace_quota.py \
+  --config configs/auth/workspace_quotas.json \
+  --state outputs/auth/workspace_quota_state.json \
+  --workspace-id dev-workspace \
+  --usage '{"total_tokens": 1000}'
+```
+
 Agent CLI:
 
 ```bash
@@ -159,16 +230,15 @@ python agent/runtime.py \
 
 ## Current limitations
 
-- State is file-backed and process-local, not distributed.
-- No locking is implemented for concurrent writers.
+- SQLite backend is local-node SQLite, not a distributed quota service.
+- File backend remains process-local and has no cross-process lock.
 - Quota is currently integrated into Agent provider execution, not every `/v1/*` API endpoint.
-- Multi-round model tool-loop usage is not aggregated into quota as one total yet.
 - Provider invoice or external billing reconciliation is not implemented.
 - Quota windows are calendar daily/monthly UTC windows, not custom rolling windows.
+- No dashboard or alerting layer yet.
 
 ## Next steps
 
-- Add distributed quota backend.
-- Add multi-round model tool-loop usage aggregation.
+- Add Postgres/distributed quota backend.
 - Add API middleware-level quota checks for selected scopes.
 - Add workspace budget dashboards and rollups.
