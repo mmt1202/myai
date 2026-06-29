@@ -64,15 +64,7 @@ def lease_is_expired(lease: dict[str, Any] | None, *, at: datetime | None = None
 def worker_lease_marker(run_id: str, worker_id: str, *, lease_seconds: int, at: datetime | None = None) -> dict[str, Any]:
     current = at or utc_now()
     seconds = normalize_lease_seconds(lease_seconds)
-    return {
-        "run_id": run_id,
-        "worker_id": str(worker_id),
-        "claimed_at": current.isoformat(),
-        "renewed_at": current.isoformat(),
-        "lease_seconds": seconds,
-        "lease_expires_at": (current + timedelta(seconds=seconds)).isoformat(),
-        "status": "claimed",
-    }
+    return {"run_id": run_id, "worker_id": str(worker_id), "claimed_at": current.isoformat(), "renewed_at": current.isoformat(), "lease_seconds": seconds, "lease_expires_at": (current + timedelta(seconds=seconds)).isoformat(), "status": "claimed"}
 
 
 def normalize_list_limit(limit: int | None) -> int:
@@ -93,38 +85,10 @@ def normalize_sort_order(order: str | None) -> str:
 
 
 def run_summary_from_report(run_id: str, report: dict[str, Any], *, run_store: dict[str, Any] | None = None) -> dict[str, Any]:
-    return {
-        "run_id": run_id,
-        "status": report.get("status"),
-        "error": report.get("error"),
-        "created_at": report.get("created_at"),
-        "updated_at": report.get("updated_at"),
-        "completed_at": report.get("completed_at"),
-        "task": report.get("task"),
-        "owner_id": report.get("owner_id"),
-        "project_id": report.get("project_id"),
-        "workspace_id": report.get("workspace_id"),
-        "parent_run_id": report.get("parent_run_id"),
-        "retry_of": report.get("retry_of"),
-        "resume_of": report.get("resume_of"),
-        "route_mode": report.get("route_mode"),
-        "selected_model_id": (report.get("route_decision") or {}).get("selected_model_id"),
-        "artifact_count": len(report.get("artifacts") or {}),
-        "has_provider_response": bool(report.get("provider_response")),
-        "run_store": run_store or {},
-    }
+    return {"run_id": run_id, "status": report.get("status"), "error": report.get("error"), "created_at": report.get("created_at"), "updated_at": report.get("updated_at"), "completed_at": report.get("completed_at"), "task": report.get("task"), "owner_id": report.get("owner_id"), "project_id": report.get("project_id"), "workspace_id": report.get("workspace_id"), "parent_run_id": report.get("parent_run_id"), "retry_of": report.get("retry_of"), "resume_of": report.get("resume_of"), "route_mode": report.get("route_mode"), "selected_model_id": (report.get("route_decision") or {}).get("selected_model_id"), "artifact_count": len(report.get("artifacts") or {}), "has_provider_response": bool(report.get("provider_response")), "run_store": run_store or {}}
 
 
-def run_summary_matches_filters(
-    summary: dict[str, Any],
-    *,
-    status: str | None = None,
-    owner_id: str | None = None,
-    project_id: str | None = None,
-    workspace_id: str | None = None,
-    parent_run_id: str | None = None,
-    query: str | None = None,
-) -> bool:
+def run_summary_matches_filters(summary: dict[str, Any], *, status: str | None = None, owner_id: str | None = None, project_id: str | None = None, workspace_id: str | None = None, parent_run_id: str | None = None, query: str | None = None) -> bool:
     filters = {"status": status, "owner_id": owner_id, "project_id": project_id, "workspace_id": workspace_id, "parent_run_id": parent_run_id}
     for key, value in filters.items():
         if value is not None and str(summary.get(key) or "") != str(value):
@@ -199,19 +163,7 @@ class RunStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def list_runs(
-        self,
-        *,
-        status: str | None = None,
-        owner_id: str | None = None,
-        project_id: str | None = None,
-        workspace_id: str | None = None,
-        parent_run_id: str | None = None,
-        query: str | None = None,
-        limit: int | None = None,
-        offset: int | None = None,
-        order: str | None = None,
-    ) -> dict[str, Any]:
+    def list_runs(self, *, status: str | None = None, owner_id: str | None = None, project_id: str | None = None, workspace_id: str | None = None, parent_run_id: str | None = None, query: str | None = None, limit: int | None = None, offset: int | None = None, order: str | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
@@ -310,19 +262,7 @@ class FileRunStore(RunStore):
             return self.artifact_path(run_id, name)
         return self.save_json(self.artifact_path(run_id, name), artifact)
 
-    def list_runs(
-        self,
-        *,
-        status: str | None = None,
-        owner_id: str | None = None,
-        project_id: str | None = None,
-        workspace_id: str | None = None,
-        parent_run_id: str | None = None,
-        query: str | None = None,
-        limit: int | None = None,
-        offset: int | None = None,
-        order: str | None = None,
-    ) -> dict[str, Any]:
+    def list_runs(self, *, status: str | None = None, owner_id: str | None = None, project_id: str | None = None, workspace_id: str | None = None, parent_run_id: str | None = None, query: str | None = None, limit: int | None = None, offset: int | None = None, order: str | None = None) -> dict[str, Any]:
         runs: list[dict[str, Any]] = []
         if self.output_root.exists():
             for child in self.output_root.iterdir():
@@ -353,7 +293,7 @@ class FileRunStore(RunStore):
         self.load_report(safe_id)
         current = now or utc_now()
         existing = self.load_worker_lease(safe_id)
-        if existing and not lease_is_expired(existing, at=current) and existing.get("worker_id") != worker_id:
+        if existing and existing.get("status") == "claimed" and not lease_is_expired(existing, at=current) and existing.get("worker_id") != worker_id:
             return {"claimed": False, "run_id": safe_id, "worker_id": worker_id, "active_lease": existing, "reason": "already_claimed", "run_store": self.metadata()}
         lease = worker_lease_marker(safe_id, worker_id, lease_seconds=lease_seconds, at=current)
         self.save_worker_lease(safe_id, lease)
@@ -363,7 +303,7 @@ class FileRunStore(RunStore):
         safe_id = self.safe_run_id(run_id)
         current = now or utc_now()
         existing = self.load_worker_lease(safe_id)
-        if not existing:
+        if not existing or existing.get("status") != "claimed":
             return {"renewed": False, "run_id": safe_id, "worker_id": worker_id, "reason": "no_active_lease", "run_store": self.metadata()}
         if existing.get("worker_id") != worker_id:
             return {"renewed": False, "run_id": safe_id, "worker_id": worker_id, "active_lease": existing, "reason": "worker_mismatch", "run_store": self.metadata()}
@@ -377,7 +317,7 @@ class FileRunStore(RunStore):
     def release_run(self, run_id: str, worker_id: str, *, now: datetime | None = None) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
         existing = self.load_worker_lease(safe_id)
-        if not existing:
+        if not existing or existing.get("status") != "claimed":
             return {"released": False, "run_id": safe_id, "worker_id": worker_id, "reason": "no_active_lease", "run_store": self.metadata()}
         if existing.get("worker_id") != worker_id:
             return {"released": False, "run_id": safe_id, "worker_id": worker_id, "active_lease": existing, "reason": "worker_mismatch", "run_store": self.metadata()}
@@ -407,19 +347,7 @@ class FileRunStore(RunStore):
     def status(self, run_id: str) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
         report = self.load_report(safe_id)
-        return {
-            "run_id": safe_id,
-            "status": report.get("status"),
-            "error": report.get("error"),
-            "created_at": report.get("created_at"),
-            "updated_at": report.get("updated_at"),
-            "completed_at": report.get("completed_at"),
-            "cancel_requested": self.cancel_requested(safe_id),
-            "worker_lease": self.load_worker_lease(safe_id),
-            "artifacts": report.get("artifacts") or {},
-            "event_summary": self.event_summary(safe_id),
-            "run_store": self.metadata(),
-        }
+        return {"run_id": safe_id, "status": report.get("status"), "error": report.get("error"), "created_at": report.get("created_at"), "updated_at": report.get("updated_at"), "completed_at": report.get("completed_at"), "cancel_requested": self.cancel_requested(safe_id), "worker_lease": self.load_worker_lease(safe_id), "artifacts": report.get("artifacts") or {}, "event_summary": self.event_summary(safe_id), "run_store": self.metadata()}
 
     def metadata(self) -> dict[str, Any]:
         return {"type": "file", "output_root": str(self.output_root)}
@@ -439,11 +367,11 @@ def default_sqlite_path(output_root: Path) -> Path:
 
 def normalize_run_store_kind(kind: str | None) -> str:
     value = str(kind or "file").strip().lower().replace("_", "-")
-    aliases = {"": "file", "file-backed": "file", "file-run-store": "file", "sqlite3": "sqlite", "sqlite-run-store": "sqlite"}
+    aliases = {"": "file", "file-backed": "file", "file-run-store": "file", "sqlite3": "sqlite", "sqlite-run-store": "sqlite", "postgresql": "postgres", "postgres-run-store": "postgres", "pg": "postgres"}
     return aliases.get(value, value)
 
 
-def build_run_store(kind: str | None, output_root: Path, *, sqlite_path: Path | str | None = None) -> RunStore:
+def build_run_store(kind: str | None, output_root: Path, *, sqlite_path: Path | str | None = None, postgres_dsn: str | None = None) -> RunStore:
     normalized = normalize_run_store_kind(kind)
     if normalized == "file":
         return file_run_store(output_root)
@@ -451,4 +379,8 @@ def build_run_store(kind: str | None, output_root: Path, *, sqlite_path: Path | 
         from agent.sqlite_run_store import sqlite_run_store
 
         return sqlite_run_store(Path(sqlite_path) if sqlite_path else default_sqlite_path(output_root))
+    if normalized == "postgres":
+        from agent.postgres_run_store import postgres_run_store
+
+        return postgres_run_store(postgres_dsn, output_root=output_root)
     raise ValueError(f"unsupported run store: {kind}")
