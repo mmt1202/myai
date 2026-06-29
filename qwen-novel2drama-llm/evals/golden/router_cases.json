@@ -1,0 +1,8 @@
+{
+  "suite": "router",
+  "cases": [
+    {"case_id": "router_local_chat", "task": "router", "request": {"actual": {"selected": "local", "status": "ok"}}, "expected": {"selected": "local", "status": "ok"}},
+    {"case_id": "router_vision", "task": "router", "request": {"actual": {"capability": "vision", "status": "ok"}}, "expected": {"capability": "vision", "status": "ok"}},
+    {"case_id": "router_cost", "task": "router", "request": {"actual": {"mode": "balanced", "cost_checked": true}}, "expected": {"mode": "balanced", "cost_checked": true}}
+  ]
+}
