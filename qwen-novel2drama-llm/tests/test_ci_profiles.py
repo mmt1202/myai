@@ -23,13 +23,23 @@ class CIProfilesTests(unittest.TestCase):
         self.assertEqual(profile.requirements, ("requirements/ci-core.txt",))
         self.assertIsNone(install_command(profile))
         command = unittest_command(profile) or ""
-        self.assertIn("tests.test_foundation_core_services", command)
-        self.assertIn("tests.test_run_store", command)
-        self.assertIn("tests.test_sqlite_run_store", command)
-        self.assertIn("tests.test_agent_lifecycle", command)
-        self.assertIn("tests.test_worker_dispatcher", command)
-        self.assertIn("tests.test_postgres_migration_history", command)
-        self.assertIn("tests.test_quota_store", command)
+        for test_name in [
+            "tests.test_foundation_core_services",
+            "tests.test_provider_catalog_resilience",
+            "tests.test_multimodal_router",
+            "tests.test_mcp_sdk_compat",
+            "tests.test_eval_runner",
+            "tests.test_tracing",
+            "tests.test_audit_query",
+            "tests.test_deploy_profile",
+            "tests.test_run_store",
+            "tests.test_sqlite_run_store",
+            "tests.test_agent_lifecycle",
+            "tests.test_worker_dispatcher",
+            "tests.test_postgres_migration_history",
+            "tests.test_quota_store",
+        ]:
+            self.assertIn(test_name, command)
 
     def test_api_server_profile_has_api_requirements(self) -> None:
         profile = PROFILES["api-server"]
