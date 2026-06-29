@@ -23,6 +23,7 @@ class FoundationApiServerTests(unittest.TestCase):
         self.assertIn("agent_events", result["capabilities"])
         self.assertIn("agent_lifecycle", result["capabilities"])
         self.assertIn("agent_run_store", result["capabilities"])
+        self.assertIn("agent_run_query", result["capabilities"])
         self.assertIn("provider_stream", result["capabilities"])
 
     def test_token_count_api(self) -> None:
@@ -99,12 +100,12 @@ class FoundationApiServerTests(unittest.TestCase):
             finally:
                 api_server.AGENT_OUTPUT_DIR = original
 
-    def test_agent_lifecycle_status_cancel_retry_resume_api(self) -> None:
+    def test_agent_lifecycle_status_cancel_retry_resume_and_runs_api(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             original = api_server.AGENT_OUTPUT_DIR
             api_server.AGENT_OUTPUT_DIR = Path(tmpdir)
             try:
-                run_result = api_server.agent_run_api({"run_id": "demo", "task": "hello", "route_mode": "balanced", "privacy": {"local_only": True}, "approval_policy": "never"})
+                run_result = api_server.agent_run_api({"run_id": "demo", "task": "hello", "route_mode": "balanced", "privacy": {"local_only": True}, "approval_policy": "never", "workspace_id": "w1"})
                 self.assertEqual(run_result["status"], "ok")
                 status_result = api_server.agent_status_api(run_id="demo")
                 self.assertEqual(status_result["status"], "ok")
@@ -122,6 +123,11 @@ class FoundationApiServerTests(unittest.TestCase):
                 resume_result = api_server.agent_resume_api({"run_id": "demo", "new_run_id": "demo_resume", "allow_completed": True})
                 self.assertEqual(resume_result["status"], "ok")
                 self.assertEqual(resume_result["output"]["run"]["resume_of"], "demo")
+
+                runs_result = api_server.agent_runs_api(workspace_id="w1", limit=10)
+                self.assertEqual(runs_result["status"], "ok")
+                self.assertGreaterEqual(runs_result["output"]["total"], 1)
+                self.assertIn("demo", [item["run_id"] for item in runs_result["output"]["runs"]])
             finally:
                 api_server.AGENT_OUTPUT_DIR = original
 
@@ -137,7 +143,7 @@ class FoundationApiServerTests(unittest.TestCase):
                 store = api_server.agent_run_store()
                 self.assertEqual(store.metadata()["type"], "sqlite")
 
-                run_result = api_server.agent_run_api({"run_id": "sqlite_demo", "task": "hello", "route_mode": "balanced", "privacy": {"local_only": True}, "approval_policy": "never"})
+                run_result = api_server.agent_run_api({"run_id": "sqlite_demo", "task": "hello", "route_mode": "balanced", "privacy": {"local_only": True}, "approval_policy": "never", "workspace_id": "sqlite_ws"})
                 self.assertEqual(run_result["status"], "ok")
                 status_result = api_server.agent_status_api(run_id="sqlite_demo")
                 self.assertEqual(status_result["status"], "ok")
@@ -147,6 +153,11 @@ class FoundationApiServerTests(unittest.TestCase):
                 retry_result = api_server.agent_retry_api({"run_id": "sqlite_demo", "new_run_id": "sqlite_retry", "overrides": {"task": "retry sqlite"}})
                 self.assertEqual(retry_result["status"], "ok")
                 self.assertEqual(api_server.agent_status_api(run_id="sqlite_retry")["output"]["status"], "completed")
+
+                runs_result = api_server.agent_runs_api(workspace_id="sqlite_ws", query="hello")
+                self.assertEqual(runs_result["status"], "ok")
+                self.assertEqual(runs_result["output"]["run_store"]["type"], "sqlite")
+                self.assertIn("sqlite_demo", [item["run_id"] for item in runs_result["output"]["runs"]])
             finally:
                 api_server.AGENT_OUTPUT_DIR = original_dir
                 if old_store is None:
