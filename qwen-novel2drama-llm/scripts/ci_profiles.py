@@ -31,6 +31,7 @@ PROFILES: dict[str, CIProfile] = {
         requirements=("requirements/ci-core.txt",),
         tests=(
             "tests.test_foundation_core_services",
+            "tests.test_api_smoke",
             "tests.test_memory_store",
             "tests.test_rule_engine",
             "tests.test_auth_service",
@@ -84,7 +85,7 @@ PROFILES: dict[str, CIProfile] = {
         name="api-server",
         description="FastAPI API server tests. Installs the API server dependency profile only.",
         requirements=("requirements/api-server.txt",),
-        tests=("tests.test_api_server_foundation",),
+        tests=("tests.test_api_server_foundation", "tests.test_api_smoke"),
     ),
     "postgres-run-store": CIProfile(
         name="postgres-run-store",
