@@ -35,7 +35,7 @@ from providers.factory import generate_with_registry, stream_generate_with_regis
 from services.auth import AuthError, auth_required_from_env, build_auth_context, key_store_path_from_env, load_key_store
 from services.auth_audit import write_auth_event
 from services.cost_estimator import estimate_request_cost, instance_by_id
-from services.memory_store import search_memory, write_memory
+from services.memory_store import memory_store_from_env
 from services.quota_store import quota_store_from_env
 from services.rate_limiter import RateLimitError, check_rate_limit, load_json as load_rate_limit_json, rate_limit_config_path_from_env, rate_limit_enabled_from_env, rate_limit_state_path_from_env
 from services.rule_engine import evaluate_rules, load_rules
@@ -109,6 +109,10 @@ def skills_registry() -> dict[str, Any]:
 
 def default_rules() -> dict[str, Any]:
     return load_rules(PROJECT_ROOT / "configs" / "rules" / "default_rules.yaml")
+
+
+def memory_store():
+    return memory_store_from_env(project_root=PROJECT_ROOT)
 
 
 def ok(body: dict[str, Any], output: Any, **kwargs: Any) -> dict[str, Any]:
@@ -361,6 +365,10 @@ def health_components() -> dict[str, Any]:
     except Exception as exc:
         components["quota_backend"] = {"status": "failed", "error": str(exc)}
     try:
+        components["memory_backend"] = {"status": "ok", "metadata": memory_store().metadata()}
+    except Exception as exc:
+        components["memory_backend"] = {"status": "failed", "error": str(exc)}
+    try:
         instances = model_instances().get("instances") or []
         components["provider_registry"] = {"status": "ok", "instance_count": len(instances)}
     except Exception as exc:
@@ -398,7 +406,7 @@ def health() -> dict[str, str | None]:
 
 @app.get("/v1/health")
 def foundation_health() -> dict[str, Any]:
-    return {"status": "ok", "service": "myai-foundation", "model_version": ACTIVE_MODEL_VERSION, "model_path": ACTIVE_MODEL_PATH, "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "agent_run_store", "agent_run_query", "agent_db_events", "provider", "provider_stream", "auth", "rate_limit", "workspace_quota", "api_quota", "queue_observability", "readiness", "audit"]}
+    return {"status": "ok", "service": "myai-foundation", "model_version": ACTIVE_MODEL_VERSION, "model_path": ACTIVE_MODEL_PATH, "capabilities": ["router", "token", "cost", "memory", "memory_backend", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "agent_run_store", "agent_run_query", "agent_db_events", "provider", "provider_stream", "auth", "rate_limit", "workspace_quota", "api_quota", "queue_observability", "readiness", "audit"]}
 
 
 @app.get("/v1/ready")
@@ -458,14 +466,15 @@ def rules_evaluate_api(body: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/v1/memory/search")
 def memory_search_api(body: dict[str, Any]) -> dict[str, Any]:
-    items = search_memory(MEMORY_STORE_PATH, body)
-    return ok(body, {"items": items})
+    store = memory_store()
+    return ok(body, {"items": store.search(body), "memory_store": store.metadata()})
 
 
 @app.post("/v1/memory/write")
 def memory_write_api(body: dict[str, Any]) -> dict[str, Any]:
-    item = write_memory(MEMORY_STORE_PATH, body.get("item") or body)
-    return ok(body, {"item": item})
+    store = memory_store()
+    item = store.write(body.get("item") or body)
+    return ok(body, {"item": item, "memory_store": store.metadata()})
 
 
 @app.get("/v1/skills/list")
