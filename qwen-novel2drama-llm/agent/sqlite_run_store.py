@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.events import normalize_event, summarize_agent_events
-from agent.run_store import RunNotFoundError, RunStore
+from agent.run_store import RunNotFoundError, RunStore, paginate_run_summaries, run_summary_from_report, run_summary_matches_filters
 from agent.runtime import now_iso
 
 
@@ -138,6 +138,42 @@ class SQLiteRunStore(RunStore):
             self._ensure_run(conn, safe_id)
             conn.execute("INSERT INTO run_artifacts(run_id, name, path, artifact_json) VALUES(?, ?, ?, ?) ON CONFLICT(run_id, name) DO UPDATE SET path=excluded.path, artifact_json=excluded.artifact_json", (safe_id, name, path, json.dumps(deepcopy(artifact), ensure_ascii=False, sort_keys=True)))
         return self.artifact_path(safe_id, name)
+
+    def list_runs(
+        self,
+        *,
+        status: str | None = None,
+        owner_id: str | None = None,
+        project_id: str | None = None,
+        workspace_id: str | None = None,
+        parent_run_id: str | None = None,
+        query: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        order: str | None = None,
+    ) -> dict[str, Any]:
+        summaries: list[dict[str, Any]] = []
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM runs").fetchall()
+            for row in rows:
+                run_id = row["run_id"]
+                report_row = conn.execute("SELECT report_json FROM run_reports WHERE run_id = ?", (run_id,)).fetchone()
+                request_row = conn.execute("SELECT request_json FROM run_requests WHERE run_id = ?", (run_id,)).fetchone()
+                report = json.loads(report_row["report_json"]) if report_row else {}
+                request = json.loads(request_row["request_json"]) if request_row else {}
+                fallback = {**request, **report}
+                fallback.setdefault("status", row["status"])
+                fallback.setdefault("error", row["error"])
+                fallback.setdefault("created_at", row["created_at"])
+                fallback.setdefault("updated_at", row["updated_at"])
+                fallback.setdefault("completed_at", row["completed_at"])
+                artifact_count = conn.execute("SELECT COUNT(*) AS count FROM run_artifacts WHERE run_id = ?", (run_id,)).fetchone()["count"]
+                fallback.setdefault("artifacts", {"_indexed_count": artifact_count} if artifact_count else {})
+                summary = run_summary_from_report(run_id, fallback, run_store=self.metadata())
+                if run_summary_matches_filters(summary, status=status, owner_id=owner_id, project_id=project_id, workspace_id=workspace_id, parent_run_id=parent_run_id, query=query):
+                    summaries.append(summary)
+        page = paginate_run_summaries(summaries, limit=limit, offset=offset, order=order)
+        return {**page, "run_store": self.metadata(), "filters": {"status": status, "owner_id": owner_id, "project_id": project_id, "workspace_id": workspace_id, "parent_run_id": parent_run_id, "query": query}}
 
     def status(self, run_id: str) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
