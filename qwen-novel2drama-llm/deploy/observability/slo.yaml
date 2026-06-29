@@ -1,0 +1,20 @@
+service: myai-foundation
+slos:
+  availability:
+    objective: 99.5
+    window: 30d
+  api_latency_p95_ms:
+    objective: 1500
+    window: 7d
+  provider_error_rate:
+    objective_max_percent: 5
+    window: 1d
+alerts:
+  - name: high_api_error_rate
+    condition: api_error_rate > 0.05 for 10m
+  - name: queue_backlog_high
+    condition: queued_jobs > 100 for 15m
+  - name: provider_failures_high
+    condition: provider_error_rate > 0.10 for 10m
+  - name: media_jobs_stalled
+    condition: media_jobs_running_too_long > 0 for 30m
