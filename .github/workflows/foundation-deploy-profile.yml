@@ -1,0 +1,35 @@
+name: Foundation Deploy Profile
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "qwen-novel2drama-llm/Dockerfile"
+      - "qwen-novel2drama-llm/compose.production.yml"
+      - "qwen-novel2drama-llm/configs/deploy/**"
+      - "qwen-novel2drama-llm/scripts/deploy_profile.py"
+      - "qwen-novel2drama-llm/scripts/production_preflight.py"
+      - ".github/workflows/foundation-deploy-profile.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-profile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: qwen-novel2drama-llm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run deploy profile validator
+        run: python scripts/deploy_profile.py
+      - name: Run production preflight
+        run: python scripts/production_preflight.py
+      - name: Run deploy profile tests
+        run: python -m unittest tests.test_deploy_profile tests.test_production_preflight
