@@ -73,11 +73,22 @@ def summarize_agent_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def store_accepts_live_events(store: Any | None) -> bool:
+    if store is None or not hasattr(store, "append_event"):
+        return False
+    try:
+        metadata = store.metadata() if hasattr(store, "metadata") else {}
+    except Exception:  # noqa: BLE001
+        metadata = {}
+    return metadata.get("type") != "file"
+
+
 class AgentEventWriter:
-    def __init__(self, path: Path, run: dict[str, Any] | None = None, *, enabled: bool = True) -> None:
+    def __init__(self, path: Path, run: dict[str, Any] | None = None, *, enabled: bool = True, store: Any | None = None) -> None:
         self.path = path
         self.run = run or {}
         self.enabled = enabled
+        self.store = store if store_accepts_live_events(store) else None
 
     def context(self) -> dict[str, Any]:
         return {
@@ -100,7 +111,7 @@ class AgentEventWriter:
         if not self.enabled:
             return None
         step = step or {}
-        return write_agent_event(
+        event = write_agent_event(
             self.path,
             {
                 **self.context(),
@@ -113,6 +124,12 @@ class AgentEventWriter:
                 "error": error,
             },
         )
+        if self.store is not None and event.get("run_id"):
+            try:
+                self.store.append_event(str(event["run_id"]), event)
+            except Exception:  # noqa: BLE001
+                pass
+        return event
 
 
 def main() -> int:
