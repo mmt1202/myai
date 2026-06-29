@@ -1,0 +1,17 @@
+{
+  "suite": "foundation_smoke",
+  "cases": [
+    {
+      "case_id": "router_local_only",
+      "task": "router_eval",
+      "request": {"actual": {"selected_model_id": "local.qwen2_5_1_5b_instruct", "status": "routed"}},
+      "expected": {"selected_model_id": "local.qwen2_5_1_5b_instruct", "status": "routed"}
+    },
+    {
+      "case_id": "tool_loop_ok",
+      "task": "tool_loop_eval",
+      "request": {"actual": {"status": "ok", "tool_calls": 1}},
+      "expected": {"status": "ok", "tool_calls": 1}
+    }
+  ]
+}
