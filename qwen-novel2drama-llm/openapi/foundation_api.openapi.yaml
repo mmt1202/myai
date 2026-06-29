@@ -21,12 +21,7 @@ paths:
       operationId: createChat
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationRequest'}}}}
       responses:
-        '200':
-          description: Chat response or text/event-stream when stream=true and execute_provider=true
-          content:
-            application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}
-            text/event-stream:
-              schema: {type: string}
+        '200': {description: Chat response or text/event-stream when stream=true and execute_provider=true, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}, text/event-stream: {schema: {type: string}}}}
         '401': {description: Missing or invalid API key, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
         '403': {description: Scope or workspace denied, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/reason:
@@ -125,6 +120,22 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRunRequest'}}}}
       responses:
         '200': {description: Agent run response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
+  /v1/agent/runs:
+    get:
+      summary: List Agent runs from the selected run store
+      operationId: listAgentRuns
+      parameters:
+        - {in: query, name: status, required: false, schema: {type: string}}
+        - {in: query, name: owner_id, required: false, schema: {type: string}}
+        - {in: query, name: project_id, required: false, schema: {type: string}}
+        - {in: query, name: workspace_id, required: false, schema: {type: string}}
+        - {in: query, name: parent_run_id, required: false, schema: {type: string}}
+        - {in: query, name: query, required: false, schema: {type: string}}
+        - {in: query, name: limit, required: false, schema: {type: integer, default: 50, maximum: 200}}
+        - {in: query, name: offset, required: false, schema: {type: integer, default: 0}}
+        - {in: query, name: order, required: false, schema: {type: string, enum: [asc, desc], default: desc}}
+      responses:
+        '200': {description: Agent run list response, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}}}
   /v1/agent/events:
     get:
       summary: Read or stream Agent run events
@@ -137,12 +148,7 @@ paths:
         - {in: query, name: poll_interval, required: false, schema: {type: number, default: 1.0}}
         - {in: query, name: max_seconds, required: false, schema: {type: integer, default: 60}}
       responses:
-        '200':
-          description: Agent events JSON response or text/event-stream when stream=true
-          content:
-            application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}
-            text/event-stream:
-              schema: {type: string}
+        '200': {description: Agent events JSON response or text/event-stream when stream=true, content: {application/json: {schema: {$ref: '#/components/schemas/FoundationResponse'}}, text/event-stream: {schema: {type: string}}}}
   /v1/agent/status:
     get:
       summary: Read Agent run lifecycle status
@@ -282,56 +288,11 @@ components:
         done: {type: boolean}
         metadata: {type: object, additionalProperties: true}
       additionalProperties: true
-    MemoryRequest:
-      type: object
-      properties:
-        scope: {type: string, enum: [session, user, project, task]}
-        owner_id: {type: string}
-        project_id: {type: string}
-        session_id: {type: string}
-        task_id: {type: string}
-        workspace_id: {type: string}
-        query: {type: string}
-        tags: {type: array, items: {type: string}}
-        max_sensitivity: {type: string}
-        include_expired: {type: boolean}
-        limit: {type: integer}
-      additionalProperties: true
-    MemoryWriteRequest:
-      type: object
-      properties:
-        workspace_id: {type: string}
-        item: {type: object, additionalProperties: true}
-      additionalProperties: true
-    RuleRequest:
-      type: object
-      properties:
-        workspace_id: {type: string}
-        ruleset: {type: object, additionalProperties: true}
-        context: {type: object, additionalProperties: true}
-      additionalProperties: true
-    SkillCallRequest:
-      type: object
-      required: [name]
-      properties:
-        workspace_id: {type: string}
-        name: {type: string}
-        arguments: {type: object, additionalProperties: true}
-        allow_provider: {type: boolean, default: false}
-        allow_write: {type: boolean, default: false}
-        approved: {type: boolean, default: false}
-      additionalProperties: true
-    McpCallRequest:
-      type: object
-      required: [name]
-      properties:
-        workspace_id: {type: string}
-        name: {type: string}
-        arguments: {type: object, additionalProperties: true}
-        allow_provider: {type: boolean, default: false}
-        allow_write: {type: boolean, default: false}
-        approved: {type: boolean, default: false}
-      additionalProperties: true
+    MemoryRequest: {type: object, additionalProperties: true}
+    MemoryWriteRequest: {type: object, additionalProperties: true}
+    RuleRequest: {type: object, additionalProperties: true}
+    SkillCallRequest: {type: object, required: [name], properties: {name: {type: string}, arguments: {type: object, additionalProperties: true}, allow_provider: {type: boolean, default: false}, allow_write: {type: boolean, default: false}, approved: {type: boolean, default: false}}, additionalProperties: true}
+    McpCallRequest: {type: object, required: [name], properties: {name: {type: string}, arguments: {type: object, additionalProperties: true}, allow_provider: {type: boolean, default: false}, allow_write: {type: boolean, default: false}, approved: {type: boolean, default: false}}, additionalProperties: true}
     AgentSkillCall:
       type: object
       required: [name]
@@ -420,6 +381,38 @@ components:
         artifacts: {type: object, additionalProperties: true}
         event_summary: {type: object, additionalProperties: true}
         run: {type: object, additionalProperties: true}
+      additionalProperties: true
+    AgentRunSummary:
+      type: object
+      properties:
+        run_id: {type: string}
+        status: {type: string}
+        error: {type: [string, 'null']}
+        created_at: {type: string}
+        updated_at: {type: string}
+        completed_at: {type: [string, 'null']}
+        task: {type: string}
+        owner_id: {type: [string, 'null']}
+        project_id: {type: [string, 'null']}
+        workspace_id: {type: [string, 'null']}
+        parent_run_id: {type: [string, 'null']}
+        retry_of: {type: [string, 'null']}
+        resume_of: {type: [string, 'null']}
+        route_mode: {type: string}
+        selected_model_id: {type: [string, 'null']}
+        artifact_count: {type: integer}
+        has_provider_response: {type: boolean}
+      additionalProperties: true
+    AgentRunsResponse:
+      type: object
+      properties:
+        runs: {type: array, items: {$ref: '#/components/schemas/AgentRunSummary'}}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+        order: {type: string}
+        filters: {type: object, additionalProperties: true}
+        run_store: {type: object, additionalProperties: true}
       additionalProperties: true
     AgentEvent:
       type: object
