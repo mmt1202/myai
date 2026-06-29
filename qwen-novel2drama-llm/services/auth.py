@@ -19,6 +19,7 @@ PATH_SCOPE_RULES = [
     ("POST", "/v1/memory/write", "memory:write"),
     ("POST", "/v1/rules/evaluate", "rules:evaluate"),
     ("POST", "/v1/agent/run", "agent:run"),
+    ("GET", "/v1/agent/runs", "agent:run"),
     ("GET", "/v1/agent/events", "agent:run"),
     ("GET", "/v1/agent/status", "agent:run"),
     ("POST", "/v1/agent/cancel", "agent:run"),
@@ -113,14 +114,7 @@ def authorize_api_key(store: dict[str, Any], api_key: str | None, *, required_sc
         raise AuthError("permission_denied", f"missing required scope: {required_scope}", status_code=403)
     if not workspace_allowed(record, workspace_id):
         raise AuthError("permission_denied", f"workspace is not allowed: {workspace_id}", status_code=403)
-    return {
-        "key_id": record.get("key_id"),
-        "owner_id": record.get("owner_id"),
-        "workspace_id": workspace_id,
-        "scopes": record.get("scopes") or [],
-        "workspaces": record.get("workspaces") or [],
-        "metadata": record.get("metadata") or {},
-    }
+    return {"key_id": record.get("key_id"), "owner_id": record.get("owner_id"), "workspace_id": workspace_id, "scopes": record.get("scopes") or [], "workspaces": record.get("workspaces") or [], "metadata": record.get("metadata") or {}}
 
 
 def anonymous_context() -> dict[str, Any]:
@@ -162,14 +156,7 @@ def main() -> int:
         return 0
     store = load_key_store(Path(args.store))
     try:
-        context = build_auth_context(
-            method=args.method,
-            path=args.path,
-            api_key=args.api_key,
-            workspace_id=args.workspace_id,
-            store=store,
-            auth_required=True,
-        )
+        context = build_auth_context(method=args.method, path=args.path, api_key=args.api_key, workspace_id=args.workspace_id, store=store, auth_required=True)
         print(json.dumps({"authorized": True, "context": context}, ensure_ascii=False, indent=2))
         return 0
     except AuthError as exc:
