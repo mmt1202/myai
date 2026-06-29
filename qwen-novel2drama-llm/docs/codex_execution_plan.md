@@ -221,3 +221,9 @@ docs/implementation_status.md
 ```text
 P1_secret_gated_provider_smoke_tests_implemented_v1 = true
 ```
+
+### T013 — Postgres/distributed quota backend v1
+
+Status: completed. Added optional Postgres quota persistence with schema migration, optional dependency profile, backend aliases (`postgres`, `postgresql`, `pg`), DSN environment variable `FOUNDATION_QUOTA_POSTGRES_DSN`, and DSN-gated tests. Core CI should continue using file/SQLite paths and must not require a live Postgres service.
+
+Scope boundary: persistence v1 only; not full billing, global distributed limiter, or production billing.
