@@ -25,6 +25,7 @@ REQUIRED_RUNTIME_ENDPOINTS = {
     "/v1/mcp/tools",
     "/v1/mcp/call",
     "/v1/agent/run",
+    "/v1/agent/runs",
     "/v1/agent/events",
     "/v1/agent/status",
     "/v1/agent/cancel",
@@ -43,6 +44,8 @@ REQUIRED_OPENAPI_TOKENS = {
     "ProviderStreamEvent:",
     "ProviderToolCall:",
     "AgentRunRequest:",
+    "AgentRunSummary:",
+    "AgentRunsResponse:",
     "AgentSkillCall:",
     "AgentLifecycleRequest:",
     "AgentLifecycleResponse:",
@@ -76,6 +79,8 @@ REQUIRED_OPENAPI_TOKENS = {
     "approve_model_tools:",
     "fail_on_model_tool_error:",
     "disable_events:",
+    "parent_run_id:",
+    "selected_model_id:",
 }
 
 DISALLOWED_OPENAPI_ENDPOINTS = {
@@ -126,16 +131,7 @@ def check_contract(api_server_path: Path, openapi_path: Path) -> dict[str, Any]:
     disallowed_declared = sorted(path for path in DISALLOWED_OPENAPI_ENDPOINTS if path in openapi_paths or path in openapi_text)
     missing_required_tokens = missing_tokens(openapi_text)
 
-    ok = not any(
-        [
-            missing_required_runtime,
-            missing_required_openapi,
-            runtime_not_in_openapi,
-            openapi_not_in_runtime,
-            disallowed_declared,
-            missing_required_tokens,
-        ]
-    )
+    ok = not any([missing_required_runtime, missing_required_openapi, runtime_not_in_openapi, openapi_not_in_runtime, disallowed_declared, missing_required_tokens])
     return {
         "ok": ok,
         "runtime_paths": sorted(runtime_paths),
@@ -162,14 +158,7 @@ def main() -> int:
     else:
         status = "ok" if report["ok"] else "failed"
         print(f"openapi_contract_check={status}")
-        for key in [
-            "missing_required_runtime",
-            "missing_required_openapi",
-            "runtime_not_in_openapi",
-            "openapi_not_in_runtime",
-            "disallowed_declared",
-            "missing_required_tokens",
-        ]:
+        for key in ["missing_required_runtime", "missing_required_openapi", "runtime_not_in_openapi", "openapi_not_in_runtime", "disallowed_declared", "missing_required_tokens"]:
             if report[key]:
                 print(f"{key}:")
                 for item in report[key]:
