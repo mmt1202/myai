@@ -14,6 +14,7 @@ Implemented files:
 - `providers/factory.py`
 - `scripts/provider_smoke_test.py`
 - `requirements/provider-smoke.txt`
+- `.github/workflows/foundation-provider-smoke.yml`
 - `tests/test_provider_adapter_contract.py`
 - `tests/test_provider_factory.py`
 - `tests/test_local_text_provider.py`
@@ -93,6 +94,7 @@ It can:
 ```text
 scripts/provider_smoke_test.py
 requirements/provider-smoke.txt
+.github/workflows/foundation-provider-smoke.yml
 ```
 
 Default behavior is safe:
@@ -101,6 +103,7 @@ Default behavior is safe:
 - missing config returns `skipped`
 - `--dry-run` validates config/request shape without a provider call
 - public output reports only whether a credential variable is configured, never its value
+- workflow is manual and only runs config tests plus dry-run by default
 
 Configuration env:
 
@@ -126,6 +129,12 @@ python scripts/ci_profiles.py --profile provider-smoke
 python -m unittest tests.test_provider_smoke_config
 ```
 
+Manual workflow:
+
+```text
+.github/workflows/foundation-provider-smoke.yml
+```
+
 ## Local text provider
 
 `providers/local_text.py` adapts the existing local `inference/model_utils.py` runtime to the provider contract.
@@ -137,5 +146,4 @@ It supports local dry-run, local model resolution, cache/concurrency controls, l
 - Provider-native continuation v1 includes a test-double adapter and explicit OpenAI-compatible routing for configured test protocols.
 - Real OpenAI Realtime/Responses same-session continuation is still not implemented.
 - Provider smoke runner is gated and optional; it is not part of default core CI.
-- Workflow creation for provider smoke was blocked by the connector safety layer and is not yet present.
 - Provider-specific realtime session management still needs dedicated adapters.
