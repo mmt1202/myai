@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -73,6 +74,42 @@ class RunStoreTests(unittest.TestCase):
             self.assertEqual(page["offset"], 1)
             self.assertEqual(len(page["runs"]), 1)
 
+    def test_file_run_store_worker_lease_claim_renew_release(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = file_run_store(Path(tmpdir))
+            store.save_report("demo", {"run_id": "demo", "status": "running", "artifacts": {}})
+            at = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+
+            claim = store.claim_run("demo", "worker-a", lease_seconds=30, now=at)
+            self.assertTrue(claim["claimed"])
+            self.assertEqual(claim["lease"]["worker_id"], "worker-a")
+            self.assertEqual(store.status("demo")["worker_lease"]["worker_id"], "worker-a")
+
+            blocked = store.claim_run("demo", "worker-b", lease_seconds=30, now=at + timedelta(seconds=10))
+            self.assertFalse(blocked["claimed"])
+            self.assertEqual(blocked["reason"], "already_claimed")
+
+            renewed = store.renew_lease("demo", "worker-a", lease_seconds=60, now=at + timedelta(seconds=10))
+            self.assertTrue(renewed["renewed"])
+            self.assertEqual(renewed["lease"]["claimed_at"], claim["lease"]["claimed_at"])
+
+            released = store.release_run("demo", "worker-a", now=at + timedelta(seconds=20))
+            self.assertTrue(released["released"])
+            self.assertEqual(store.load_worker_lease("demo")["status"], "released")
+
+    def test_file_run_store_expired_lease_can_be_reclaimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = file_run_store(Path(tmpdir))
+            store.save_report("demo", {"run_id": "demo", "status": "running", "artifacts": {}})
+            at = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+            store.claim_run("demo", "worker-a", lease_seconds=5, now=at)
+            expired = store.find_expired_leases(now=at + timedelta(seconds=6))
+            self.assertEqual(len(expired), 1)
+            self.assertEqual(expired[0]["run_id"], "demo")
+            reclaimed = store.claim_run("demo", "worker-b", lease_seconds=30, now=at + timedelta(seconds=6))
+            self.assertTrue(reclaimed["claimed"])
+            self.assertEqual(reclaimed["lease"]["worker_id"], "worker-b")
+
     def test_cancel_marker_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             store = file_run_store(Path(tmpdir))
@@ -84,11 +121,7 @@ class RunStoreTests(unittest.TestCase):
     def test_file_run_store_is_compatible_with_runtime_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_root = Path(tmpdir)
-            run = run_agent_once(
-                PROJECT_ROOT,
-                {"run_id": "demo", "task": "hello", "route_mode": "balanced", "privacy": {"local_only": True}, "approval_policy": "never"},
-                output_root / "demo",
-            )
+            run = run_agent_once(PROJECT_ROOT, {"run_id": "demo", "task": "hello", "route_mode": "balanced", "privacy": {"local_only": True}, "approval_policy": "never"}, output_root / "demo")
             self.assertEqual(run["status"], "completed")
             store = file_run_store(output_root)
             self.assertEqual(store.load_request("demo")["task"], "hello")
