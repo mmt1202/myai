@@ -1,0 +1,10 @@
+{
+  "request_id": "route_smoke",
+  "route_mode": "balanced",
+  "required_capabilities": ["text.chat"],
+  "privacy": {"local_only": true},
+  "input": [
+    {"type": "text", "text": "hello"}
+  ],
+  "expected_output_tokens": 32
+}
