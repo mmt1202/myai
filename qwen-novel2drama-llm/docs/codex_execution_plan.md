@@ -51,7 +51,7 @@ python -m unittest tests.test_api_server_foundation
 python -m unittest tests.test_agent_runtime tests.test_agent_lifecycle tests.test_agent_events tests.test_agent_tool_loop tests.test_run_store tests.test_sqlite_run_store
 ```
 
-禁止误判：RunStore/SQLite/API/run listing/DB-backed events/SQLite quota backend/worker lease/Postgres persistence v1 都是阶段性能力，不等于 migration runner、连接池、完整分布式任务队列、分布式事件总线、WebSocket、全文搜索、全局限流或生产级调度已完成。
+禁止误判：RunStore/SQLite/API/run listing/DB-backed events/SQLite quota backend/worker lease/Postgres persistence/migration runner 都是阶段性能力，不等于 schema migration history、完整分布式任务队列、分布式事件总线、WebSocket、全文搜索、全局限流或生产级调度已完成。
 
 ---
 
@@ -70,6 +70,7 @@ P1_sqlite_quota_rate_limit_backend_implemented_v1 = true
 P1_agent_worker_lease_implemented_v1 = true
 P1_postgres_run_store_scaffold_implemented_v1 = true
 P1_postgres_run_store_persistence_implemented_v1 = true
+P1_postgres_run_store_migration_runner_implemented_v1 = true
 P1_agent_lifecycle_resume_cancel_retry_implemented_v1 = true
 P1_agent_lifecycle_api_endpoints_implemented_v1 = true
 P1_agent_run_store_abstraction_implemented_v1 = true
@@ -151,33 +152,15 @@ P1_model_decided_tool_loop_implemented_v1 = true
 
 状态：**已完成**。
 
-完成内容：`PostgresRunStore` request/report/event/cancel/artifact/list/status/lease persistence、Postgres schema SQL、optional dependency profile、optional workflow、contract tests、文档、状态同步。
-
-状态标记：
-
-```text
-P1_postgres_run_store_persistence_implemented_v1 = true
-```
-
 边界：真实 Postgres store 完成不等于 migration runner、连接池、完整 worker queue 或生产部署完成。
 
 ---
 
 ## T010：Postgres migration runner / connection pool profile v1
 
-目标：为 Postgres run store 增加迁移执行入口和连接池配置层。
+状态：**已完成**。
 
-建议文件：
-
-```text
-agent/postgres_run_store.py
-scripts/apply_postgres_run_store_migration.py
-configs/run_store/postgres.example.env
-requirements/postgres-run-store.txt
-tests/test_postgres_run_store_contract.py
-docs/p1_agent_run_store.md
-docs/implementation_status.md
-```
+完成内容：`PostgresConnectionProfile`、lazy `psycopg_pool.ConnectionPool`、`close()`、SQL statement splitter、`init_db(sql_path=...)`、`scripts/apply_postgres_run_store_migration.py`、`configs/run_store/postgres.example.env`、pool dependency、测试、文档、状态同步。
 
 状态标记：
 
@@ -185,7 +168,7 @@ docs/implementation_status.md
 P1_postgres_run_store_migration_runner_implemented_v1 = true
 ```
 
-边界：migration runner/connection config 完成不等于完整生产运维平台。
+边界：migration runner/connection config 完成不等于 schema migration history、完整生产运维平台或 worker queue。
 
 ---
 
@@ -214,4 +197,27 @@ docs/p1_agent_runtime.md
 
 ```text
 P1_provider_native_bidirectional_continuation_adapter_implemented_v1 = true
+```
+
+---
+
+## T012：secret-gated real provider smoke tests v1
+
+目标：增加真实 provider 的 smoke test profile，使用 secrets/env gate，默认 CI 不运行真实请求。
+
+建议文件：
+
+```text
+requirements/provider-smoke.txt
+scripts/provider_smoke_test.py
+tests/test_provider_smoke_config.py
+.github/workflows/foundation-provider-smoke.yml
+docs/p1_provider_adapter.md
+docs/implementation_status.md
+```
+
+状态标记：
+
+```text
+P1_secret_gated_provider_smoke_tests_implemented_v1 = true
 ```
