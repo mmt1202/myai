@@ -25,6 +25,7 @@ class CIProfilesTests(unittest.TestCase):
         command = unittest_command(profile) or ""
         for test_name in [
             "tests.test_foundation_core_services",
+            "tests.test_api_smoke",
             "tests.test_provider_catalog_resilience",
             "tests.test_multimodal_router",
             "tests.test_mcp_sdk_compat",
@@ -48,7 +49,7 @@ class CIProfilesTests(unittest.TestCase):
         profile = PROFILES["api-server"]
         self.assertEqual(profile.requirements, ("requirements/api-server.txt",))
         self.assertEqual(install_command(profile), "python -m pip install -r requirements/api-server.txt")
-        self.assertEqual(unittest_command(profile), "python -m unittest tests.test_api_server_foundation")
+        self.assertEqual(unittest_command(profile), "python -m unittest tests.test_api_server_foundation tests.test_api_smoke")
 
     def test_postgres_run_store_profile_has_optional_requirements(self) -> None:
         profile = PROFILES["postgres-run-store"]
@@ -72,7 +73,7 @@ class CIProfilesTests(unittest.TestCase):
     def test_command_plan_orders_install_before_tests_or_imports(self) -> None:
         api_plan = command_plan(PROFILES["api-server"])
         self.assertEqual(api_plan[0], "python -m pip install -r requirements/api-server.txt")
-        self.assertEqual(api_plan[1], "python -m unittest tests.test_api_server_foundation")
+        self.assertEqual(api_plan[1], "python -m unittest tests.test_api_server_foundation tests.test_api_smoke")
         heavy_plan = command_plan(PROFILES["local-model-imports"])
         self.assertIn("requirements/local-model.txt", heavy_plan[0])
         self.assertIn("import_check=ok", heavy_plan[1])
