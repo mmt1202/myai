@@ -14,30 +14,9 @@ class AuthServiceTests(unittest.TestCase):
     def make_store(self) -> dict:
         return {
             "keys": [
-                {
-                    "key_id": "admin",
-                    "sha256": hash_api_key("admin-key"),
-                    "status": "active",
-                    "owner_id": "u1",
-                    "workspaces": ["*"],
-                    "scopes": ["*"],
-                },
-                {
-                    "key_id": "readonly",
-                    "sha256": hash_api_key("read-key"),
-                    "status": "active",
-                    "owner_id": "u2",
-                    "workspaces": ["w1"],
-                    "scopes": ["foundation:read", "skills:read"],
-                },
-                {
-                    "key_id": "disabled",
-                    "sha256": hash_api_key("disabled-key"),
-                    "status": "disabled",
-                    "owner_id": "u3",
-                    "workspaces": ["*"],
-                    "scopes": ["*"],
-                },
+                {"key_id": "admin", "sha256": hash_api_key("admin-key"), "status": "active", "owner_id": "u1", "workspaces": ["*"], "scopes": ["*"]},
+                {"key_id": "readonly", "sha256": hash_api_key("read-key"), "status": "active", "owner_id": "u2", "workspaces": ["w1"], "scopes": ["foundation:read", "skills:read"]},
+                {"key_id": "disabled", "sha256": hash_api_key("disabled-key"), "status": "disabled", "owner_id": "u3", "workspaces": ["*"], "scopes": ["*"]},
             ]
         }
 
@@ -48,6 +27,7 @@ class AuthServiceTests(unittest.TestCase):
     def test_required_scope_for_paths(self) -> None:
         self.assertEqual(required_scope_for("POST", "/v1/chat"), "model:invoke")
         self.assertEqual(required_scope_for("POST", "/v1/memory/write"), "memory:write")
+        self.assertEqual(required_scope_for("GET", "/v1/agent/runs"), "agent:run")
         self.assertEqual(required_scope_for("GET", "/v1/agent/events"), "agent:run")
         self.assertEqual(required_scope_for("GET", "/v1/agent/status"), "agent:run")
         self.assertEqual(required_scope_for("POST", "/v1/agent/cancel"), "agent:run")
