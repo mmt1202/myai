@@ -12,40 +12,17 @@ Implemented files:
 - `providers/openai_compatible.py`
 - `providers/local_text.py`
 - `providers/factory.py`
+- `scripts/provider_smoke_test.py`
+- `requirements/provider-smoke.txt`
 - `tests/test_provider_adapter_contract.py`
 - `tests/test_provider_factory.py`
 - `tests/test_local_text_provider.py`
 - `tests/test_provider_continuation.py`
+- `tests/test_provider_smoke_config.py`
 
 ## Base provider contract
 
-`providers/base.py` defines:
-
-- `ProviderError`
-- `text_from_content_blocks`
-- `output_text_block`
-- `response_envelope`
-- `normalize_usage`
-- `provider_stream_event`
-- `continuation_capability`
-- `chunk_text`
-- `BaseProvider.generate`
-- `BaseProvider.stream_generate`
-- `BaseProvider.continuation_capability`
-- `BaseProvider.supports_bidirectional_tool_continuation`
-- `BaseProvider.continue_stream_with_tool_result`
-
-The base contract standardizes:
-
-- content block normalization
-- response envelope shape
-- provider usage normalization
-- provider error normalization
-- provider stream chunk shape
-- provider continuation capability reporting
-- provider-native same-stream continuation hook
-- capability checks
-- modality checks
+`providers/base.py` defines the provider error, response envelope, usage normalization, stream event and continuation capability contracts.
 
 ## Provider stream events
 
@@ -63,46 +40,6 @@ Supported event types:
 - `provider_stream_completed`
 - `provider_stream_failed`
 
-The completed event can include final `output`, `usage` and reconstructed `tool_calls`.
-
-## Same-stream tool-result continuation contract
-
-Providers can report whether they support provider-native bidirectional continuation:
-
-```python
-provider.continuation_capability()
-provider.supports_bidirectional_tool_continuation()
-```
-
-Default provider behavior is unsupported:
-
-```text
-protocol = unsupported
-mode = fallback_next_provider_request
-```
-
-The provider hook is:
-
-```python
-provider.continue_stream_with_tool_result(request, tool_call, tool_result, stream_context)
-```
-
-Unsupported providers emit `provider_stream_continuation_unsupported` through the Agent stream bridge and fall back to the normal next-provider-request tool loop.
-
-Model instances can declare native support under runtime config:
-
-```json
-{
-  "runtime_config": {
-    "bidirectional_tool_continuation": {
-      "supported": true,
-      "protocol": "provider_native_test",
-      "mode": "provider_native"
-    }
-  }
-}
-```
-
 ## Provider-native continuation adapter
 
 `providers/realtime_base.py` defines the provider-native continuation adapter boundary:
@@ -110,9 +47,6 @@ Model instances can declare native support under runtime config:
 - `ProviderNativeContinuationAdapter`
 - `TestDoubleContinuationAdapter`
 - `adapter_for_protocol(protocol)`
-- `provider_stream_continuation_started`
-- `provider_stream_continuation_delta`
-- `provider_stream_continuation_completed`
 
 The test-double protocols are:
 
@@ -122,9 +56,9 @@ openai_realtime_test
 openai_responses_test
 ```
 
-These protocols do not call a real provider. They prove that a provider-native continuation adapter can emit continuation chunks through the provider factory and Agent stream bridge without falling back to a next provider request.
+These protocols do not call a real provider. They prove that provider-native continuation chunks can pass through the provider factory and Agent stream bridge without falling back to a next provider request.
 
-Known real protocol names are reserved:
+Reserved real protocol names:
 
 ```text
 openai_realtime
@@ -143,64 +77,65 @@ It can:
 - build `/chat/completions` payloads
 - pass tools and tool choice when provided
 - run in dry-run mode without network calls
-- support `dry_run_provider` as a provider-level dry-run alias
 - normalize provider usage into foundation usage fields
 - return standard response envelopes
 - normalize HTTP and connection errors
 - send native `stream=true` chat completions requests
 - parse provider SSE `data: {...}` lines
-- stop on `data: [DONE]`
-- convert remote text deltas to `ProviderStreamEvent` chunks
-- emit `provider_stream_tool_call_delta` for remote `delta.tool_calls` chunks
+- emit streamed text and streamed tool-call chunks
 - reconstruct streamed tool calls by `index`
-- append fragmented `function.name` and `function.arguments`
-- decode complete JSON arguments into `arguments_json` when possible
-- include final streamed text, usage and reconstructed tool calls in `provider_stream_completed`
 - route explicitly configured provider-native test continuation protocols to `providers/realtime_base.py`
 
-Native OpenAI-compatible streaming through CLI:
+## Gated provider smoke runner
 
-```bash
-MODEL_API_KEY=your_key python providers/openai_compatible.py \
-  --request examples/provider_request.json \
-  --base-url https://provider.example/v1 \
-  --stream
-```
-
-Tool call streaming behavior:
+`providers` can be checked against a real OpenAI-compatible endpoint through:
 
 ```text
-delta.tool_calls[index].id                    -> tool_calls[index].id
-delta.tool_calls[index].type                  -> tool_calls[index].type
-delta.tool_calls[index].function.name         -> appended function.name
-delta.tool_calls[index].function.arguments    -> appended function.arguments
+scripts/provider_smoke_test.py
+requirements/provider-smoke.txt
 ```
 
-The provider adapter reconstructs tool calls. `/v1/chat` does not execute them; Agent can bridge them into the model tool loop with `stream_provider_tool_calls`. Agent can also execute complete partial streamed tool calls early with `incremental_stream_tool_execution` when the partial includes a name and JSON-decodable arguments.
+Default behavior is safe:
+
+- not enabled by default
+- missing config returns `skipped`
+- `--dry-run` validates config/request shape without a provider call
+- public output reports only whether a credential variable is configured, never its value
+
+Configuration env:
+
+```text
+FOUNDATION_PROVIDER_SMOKE_ENABLED
+FOUNDATION_PROVIDER_SMOKE_BASE_URL
+FOUNDATION_PROVIDER_SMOKE_MODEL
+FOUNDATION_PROVIDER_SMOKE_CREDENTIAL_ENV
+FOUNDATION_PROVIDER_SMOKE_TIMEOUT
+```
+
+Commands:
+
+```bash
+python scripts/provider_smoke_test.py --dry-run --json
+python scripts/provider_smoke_test.py --json
+```
+
+CI profile:
+
+```bash
+python scripts/ci_profiles.py --profile provider-smoke
+python -m unittest tests.test_provider_smoke_config
+```
 
 ## Local text provider
 
 `providers/local_text.py` adapts the existing local `inference/model_utils.py` runtime to the provider contract.
 
-It can:
-
-- build prompts from foundation content blocks
-- resolve model path from request, environment or model instance runtime config
-- run dry-run without loading model weights
-- load local transformers model through `model_utils.load_model`
-- cache loaded local model runtimes in process
-- protect cache load with a process-local load lock
-- serialize generation per cached model by default
-- expose cache stats through provider health and dry-run output
-- generate text through `model_utils.generate_text`
-- stream local text through `model_utils.generate_text_stream`
-- fall back to chunked streaming when native streamer is unavailable
-- return standard response envelopes
-- estimate usage for local runs
+It supports local dry-run, local model resolution, cache/concurrency controls, local text generation, local streaming and standard response envelopes.
 
 ## Current limitations
 
 - Provider-native continuation v1 includes a test-double adapter and explicit OpenAI-compatible routing for configured test protocols.
-- Real OpenAI Realtime/Responses same-session tool-result injection is still not implemented.
-- Same-stream continuation can still fall back to the next-provider-request loop when unsupported.
+- Real OpenAI Realtime/Responses same-session continuation is still not implemented.
+- Provider smoke runner is gated and optional; it is not part of default core CI.
+- Workflow creation for provider smoke was blocked by the connector safety layer and is not yet present.
 - Provider-specific realtime session management still needs dedicated adapters.
