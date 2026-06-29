@@ -8,7 +8,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterator
 
-from providers.base import BaseProvider, ProviderError, normalize_usage, output_text_block, provider_stream_event, response_envelope, text_from_content_blocks
+from providers.base import BaseProvider, ProviderError, continuation_capability, normalize_usage, output_text_block, provider_stream_event, response_envelope, text_from_content_blocks
+from providers.realtime_base import PROVIDER_NATIVE_PROTOCOLS, adapter_for_protocol
 
 
 class OpenAICompatibleProvider(BaseProvider):
@@ -19,6 +20,13 @@ class OpenAICompatibleProvider(BaseProvider):
         self.base_url = (base_url or os.environ.get("MODEL_BASE_URL") or "http://localhost:8000/v1").rstrip("/")
         self.api_key_env = api_key_env
         self.timeout = timeout
+
+    def continuation_capability(self) -> dict[str, Any]:
+        capability = continuation_capability(self.model_instance)
+        protocol = str(capability.get("protocol") or "unsupported")
+        if capability.get("supported") and protocol in PROVIDER_NATIVE_PROTOCOLS:
+            return {**capability, "mode": "provider_native", "provider": self.provider_name, "adapter": "openai_compatible_native_continuation"}
+        return capability
 
     def build_messages(self, request: dict[str, Any]) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
@@ -298,6 +306,20 @@ class OpenAICompatibleProvider(BaseProvider):
             metadata={"native_stream": True, "tool_call_count": len(tool_calls)},
         )
 
+    def continue_stream_with_tool_result(self, request: dict[str, Any], tool_call: dict[str, Any], tool_result: dict[str, Any], stream_context: dict[str, Any] | None = None) -> Iterator[dict[str, Any]]:
+        capability = self.continuation_capability()
+        protocol = str(capability.get("protocol") or "unsupported")
+        adapter = adapter_for_protocol(protocol)
+        if not capability.get("supported") or adapter is None:
+            raise ProviderError(
+                "bidirectional_tool_continuation_unsupported",
+                "provider-native same-stream tool-result continuation is not available for this OpenAI-compatible model",
+                retryable=False,
+                details={"capability": capability, "tool_call_id": tool_call.get("id") or tool_result.get("tool_call_id")},
+            )
+        model = {"model_id": self.model_id(), "provider": self.provider_name, "provider_model": self.provider_model(), "continuation_protocol": protocol}
+        yield from adapter.continue_with_tool_result(request, model, tool_call, tool_result, stream_context)
+
 
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -314,10 +336,8 @@ def main() -> int:
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
     request = load_json(Path(args.request))
-    if args.stream:
-        request["stream"] = True
-    instance = load_json(Path(args.model_instance)) if args.model_instance else {}
-    provider = OpenAICompatibleProvider(instance, base_url=args.base_url, api_key_env=args.api_key_env, timeout=args.timeout)
+    model_instance = load_json(Path(args.model_instance)) if args.model_instance else {}
+    provider = OpenAICompatibleProvider(model_instance, base_url=args.base_url, api_key_env=args.api_key_env, timeout=args.timeout)
     try:
         result: Any = list(provider.stream_generate(request)) if args.stream else provider.generate(request)
     except ProviderError as exc:
@@ -328,8 +348,7 @@ def main() -> int:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(text, encoding="utf-8")
     print(text, end="")
-    status = result[-1].get("event_type") if isinstance(result, list) and result else result.get("status")
-    return 0 if status in {"ok", "provider_stream_completed"} else 1
+    return 0 if (isinstance(result, list) or result.get("status") == "ok") else 1
 
 
 if __name__ == "__main__":
