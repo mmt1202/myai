@@ -7,6 +7,7 @@ Implemented files:
 - `inference/api_server.py`
 - `agent/run_store.py`
 - `agent/sqlite_run_store.py`
+- `agent/events.py`
 - `tests/test_api_server_foundation.py`
 
 ## Start server
@@ -110,11 +111,13 @@ Provider preflight only:
 }
 ```
 
-Agent events are written to the selected run store's artifact directory. With the default file store:
+Agent events are always written to compatibility JSONL when events are enabled:
 
 ```text
 outputs/agent_runtime/api/<request_id-or-run_id-or-latest>/events.jsonl
 ```
+
+When SQLite run store is selected, the runtime also appends emitted events to the SQLite `run_events` table.
 
 Read events as JSON:
 
@@ -127,6 +130,8 @@ Stream events as SSE:
 ```text
 GET /v1/agent/events?run_id=demo-run&stream=true
 ```
+
+Both JSON and SSE event APIs read from the selected run store. In file mode this means JSONL; in SQLite mode this means DB-backed `run_events`.
 
 ## Agent lifecycle APIs and run store
 
@@ -147,7 +152,7 @@ The default API server store is file-backed under:
 outputs/agent_runtime/api/<run_id>/
 ```
 
-To use SQLite for Agent lifecycle status/cancel/retry/resume, run listing and run indexing:
+To use SQLite for Agent lifecycle status/cancel/retry/resume, DB-backed events, run listing and run indexing:
 
 ```bash
 FOUNDATION_AGENT_RUN_STORE=sqlite \
@@ -225,11 +230,12 @@ POST /v1/agent/resume
 }
 ```
 
-All lifecycle and run listing endpoints use `agent:run` auth scope.
+All lifecycle, event and run listing endpoints use `agent:run` auth scope.
 
 Current lifecycle behavior:
 
 - `runs` lists summaries from the selected run store.
+- `events` reads and streams events from the selected run store.
 - `status` reads through the selected run store.
 - `cancel` writes the cancel marker through the selected run store and updates non-terminal reports to `cancelled`.
 - `retry` loads the original request through the selected run store, merges overrides, and creates a child run with `retry_of`.
@@ -237,8 +243,9 @@ Current lifecycle behavior:
 
 ## Current limitations
 
-- Agent SSE currently polls the JSONL event file.
-- Runtime still writes compatibility file artifacts; run store stores/indexes request/report/artifacts/events where available.
+- Runtime still writes compatibility file artifacts.
+- SQLite DB-backed events are local-node events, not a distributed event bus.
+- SSE is polling-based, not WebSocket or push-based infrastructure.
 - File-backed run listing scans local directories and is not for high-volume production search.
 - SQLite is local-only and not a distributed run store.
 - No Postgres run store yet.
@@ -254,7 +261,6 @@ Current lifecycle behavior:
 
 ## Next steps
 
-- Add DB-backed Agent events.
 - Add Postgres run store implementation.
 - Add distributed quota/rate limit backend.
 - Add provider-native bidirectional continuation adapter.
