@@ -99,28 +99,100 @@
       "description": "Generate through provider factory using a registered model instance."
     },
     {
-      "id": "drama.story_reasoning",
-      "name": "Drama Story Reasoning",
+      "id": "drama.novel_to_outline",
+      "name": "Drama Novel To Outline",
       "category": "drama_specialist",
-      "entrypoint": "agent.runtime:run_agent_once",
-      "status": "planned",
-      "capabilities": ["drama.story_reasoning", "text.reason"],
+      "entrypoint": "drama.skills:novel_to_outline",
+      "status": "active",
+      "capabilities": ["drama.novel.parse", "drama.outline"],
       "input_schema": {"type": "object"},
       "output_schema": {"type": "object"},
-      "permissions": {"requires_approval": false, "writes_files": true, "calls_provider": true},
-      "description": "Future specialist skill for AI short drama/comic story reasoning."
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false},
+      "description": "Parse novel text and build a short drama episode outline."
     },
     {
-      "id": "drama.visual_planning",
-      "name": "Drama Visual Planning",
+      "id": "drama.character_design",
+      "name": "Drama Character Design",
       "category": "drama_specialist",
-      "entrypoint": "agent.runtime:run_agent_once",
-      "status": "planned",
-      "capabilities": ["drama.visual_planning", "vision.understand", "image.generate", "video.generate"],
+      "entrypoint": "drama.skills:character_design",
+      "status": "active",
+      "capabilities": ["drama.character.card", "drama.character.prompt"],
       "input_schema": {"type": "object"},
       "output_schema": {"type": "object"},
-      "permissions": {"requires_approval": true, "writes_files": true, "calls_provider": true},
-      "description": "Future specialist skill for character, scene, storyboard and visual prompt planning."
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false},
+      "description": "Build character cards, relationships and concept prompts."
+    },
+    {
+      "id": "drama.scene_design",
+      "name": "Drama Scene Design",
+      "category": "drama_specialist",
+      "entrypoint": "drama.skills:scene_design",
+      "status": "active",
+      "capabilities": ["drama.scene.design"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false},
+      "description": "Extract scene and camera planning data from generated storyboards."
+    },
+    {
+      "id": "drama.storyboard",
+      "name": "Drama Storyboard",
+      "category": "drama_specialist",
+      "entrypoint": "drama.skills:storyboard",
+      "status": "active",
+      "capabilities": ["drama.storyboard"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false},
+      "description": "Build short-drama shot list with camera, action, dialogue and narration."
+    },
+    {
+      "id": "drama.video_prompt",
+      "name": "Drama Video Prompt",
+      "category": "drama_specialist",
+      "entrypoint": "drama.skills:video_prompt",
+      "status": "active",
+      "capabilities": ["drama.video.prompt", "image.generate", "video.generate"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false},
+      "description": "Generate platform-adapted AI video prompts for short-drama shots."
+    },
+    {
+      "id": "drama.dubbing_script",
+      "name": "Drama Dubbing Script",
+      "category": "drama_specialist",
+      "entrypoint": "drama.skills:dubbing_script",
+      "status": "active",
+      "capabilities": ["drama.dubbing.script"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false},
+      "description": "Extract dialogue and voiceover lines from the generated storyboard."
+    },
+    {
+      "id": "drama.hook_twist",
+      "name": "Drama Hook Twist",
+      "category": "drama_specialist",
+      "entrypoint": "drama.skills:hook_twist",
+      "status": "active",
+      "capabilities": ["drama.hook", "drama.twist"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false},
+      "description": "Extract per-episode opening hooks and ending cliffhangers."
+    },
+    {
+      "id": "drama.quality_review",
+      "name": "Drama Quality Review",
+      "category": "drama_specialist",
+      "entrypoint": "drama.skills:quality_review",
+      "status": "active",
+      "capabilities": ["drama.quality.review"],
+      "input_schema": {"type": "object"},
+      "output_schema": {"type": "object"},
+      "permissions": {"requires_approval": false, "writes_files": false, "calls_provider": false},
+      "description": "Run deterministic short-drama continuity, character, shot and prompt checks."
     }
   ]
 }
