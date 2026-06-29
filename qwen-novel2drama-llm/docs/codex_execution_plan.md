@@ -29,7 +29,7 @@ Txxx: <short English summary>
 ```bash
 python scripts/check_openapi_contract.py
 python -m unittest tests.test_openapi_contract_check tests.test_foundation_contracts
-python -m unittest tests.test_foundation_core_services tests.test_memory_store tests.test_rule_engine tests.test_auth_service tests.test_auth_audit_rate_limit tests.test_usage_reconciliation tests.test_model_tool_loop_usage tests.test_provider_continuation tests.test_run_store tests.test_sqlite_run_store tests.test_ci_profiles tests.test_workspace_quota tests.test_skill_registry tests.test_mcp_adapter
+python -m unittest tests.test_foundation_core_services tests.test_memory_store tests.test_rule_engine tests.test_auth_service tests.test_auth_audit_rate_limit tests.test_usage_reconciliation tests.test_model_tool_loop_usage tests.test_provider_continuation tests.test_run_store tests.test_sqlite_run_store tests.test_agent_events tests.test_ci_profiles tests.test_workspace_quota tests.test_skill_registry tests.test_mcp_adapter
 ```
 
 如果改到 API server，再跑：
@@ -44,7 +44,7 @@ python -m unittest tests.test_api_server_foundation
 python -m unittest tests.test_agent_runtime tests.test_agent_lifecycle tests.test_agent_events tests.test_agent_tool_loop tests.test_run_store tests.test_sqlite_run_store
 ```
 
-禁止误判：RunStore/SQLite/API/run listing 都是阶段性能力，不等于 Postgres、分布式任务队列、DB-backed SSE、全文搜索或生产级调度已完成。
+禁止误判：RunStore/SQLite/API/run listing/DB-backed events 都是阶段性能力，不等于 Postgres、分布式任务队列、分布式事件总线、WebSocket、全文搜索或生产级调度已完成。
 
 ---
 
@@ -68,6 +68,7 @@ P1_sqlite_run_store_implemented_v1 = true
 P1_agent_lifecycle_run_store_selection_implemented_v1 = true
 P1_agent_runtime_run_store_writes_implemented_v1 = true
 P1_agent_run_listing_query_implemented_v1 = true
+P1_db_backed_agent_events_implemented_v1 = true
 P1_multi_round_model_tool_loop_usage_aggregation_implemented_v1 = true
 P1_same_stream_tool_result_continuation_contract_implemented_v1 = true
 P1_local_provider_adapter_implemented_v1 = true
@@ -123,20 +124,6 @@ P1_model_decided_tool_loop_implemented_v1 = true
 
 完成内容：`RunStore.list_runs(...)`、`FileRunStore.list_runs(...)`、`SQLiteRunStore.list_runs(...)`、`GET /v1/agent/runs`、OpenAPI、auth scope、测试、文档、状态同步。
 
-支持 filters：
-
-```text
-status
-owner_id
-project_id
-workspace_id
-parent_run_id
-query
-limit
-offset
-order
-```
-
 状态标记：
 
 ```text
@@ -149,42 +136,17 @@ P1_agent_run_listing_query_implemented_v1 = true
 
 ## T005：DB-backed Agent events v1
 
-### 目标
+状态：**已完成**。
 
-让 Agent events API 可从 selected run store 读取；SQLite 下优先读取 `run_events` 表，SSE 也能轮询 DB events。
+完成内容：`AgentEventWriter(..., store=...)` 在 SQLite 模式下实时 append 到 `run_events` 表；`GET /v1/agent/events` 和 SSE 轮询都从 selected run store 读取；file store 仍读取 JSONL；测试、文档、状态同步。
 
-### 新增/修改文件
-
-```text
-agent/run_store.py
-agent/sqlite_run_store.py
-agent/events.py
-inference/api_server.py
-tests/test_sqlite_run_store.py
-tests/test_agent_events.py
-tests/test_api_server_foundation.py
-docs/p1_agent_run_store.md
-docs/p1_agent_runtime.md
-docs/p1_api_server_integration.md
-docs/implementation_status.md
-```
-
-### 验收标准
-
-- SQLite store 下 event 写入 `run_events` 表。
-- `GET /v1/agent/events` 能读取 selected store events。
-- SSE 能轮询 DB events，并保持 file store 行为不破坏。
-- OpenAPI 如有字段变化需要同步。
-
-### 状态更新
+状态标记：
 
 ```text
 P1_db_backed_agent_events_implemented_v1 = true
 ```
 
-### 边界
-
-完成后仍不是生产级分布式事件总线，也不是 WebSocket 系统。
+边界：DB-backed Agent events 完成不等于生产级分布式事件总线、WebSocket、Postgres 或任务队列完成。
 
 ---
 
@@ -204,7 +166,16 @@ tests/test_workspace_quota.py
 tests/test_auth_audit_rate_limit.py
 docs/p1_workspace_quota.md
 docs/p1_auth_api_keys.md
+docs/implementation_status.md
 ```
+
+验收标准：
+
+- 默认 file backend 不变。
+- 新增 SQLite backend。
+- 支持原子更新 request/token/cost 计数。
+- 支持 daily/monthly key。
+- API middleware / Agent quota 可选择 backend。
 
 状态标记：
 
