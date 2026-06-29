@@ -290,13 +290,17 @@ def maybe_continue_same_stream(
 
 def stream_metadata(chunks: list[dict[str, Any]], *, same_stream_requested: bool, continuation_capability: dict[str, Any] | None) -> dict[str, Any]:
     event_types = [item.get("event_type") for item in chunks]
+    native_continuation_events = [item for item in chunks if (item.get("metadata") or {}).get("provider_native") is True and str(item.get("event_type") or "").startswith("provider_stream_continuation_")]
     return {
         "same_stream_tool_result_injection_requested": same_stream_requested,
         "same_stream_tool_result_injection_supported": bool((continuation_capability or {}).get("supported")),
+        "provider_native_continuation_supported": bool((continuation_capability or {}).get("mode") == "provider_native" and (continuation_capability or {}).get("supported")),
         "continuation_capability": continuation_capability or {},
         "tool_result_event_count": event_types.count("provider_stream_tool_result"),
         "continuation_unsupported_count": event_types.count("provider_stream_continuation_unsupported"),
         "continuation_failed_count": event_types.count("provider_stream_continuation_failed"),
+        "provider_native_continuation_event_count": len(native_continuation_events),
+        "provider_native_continuation_completed_count": event_types.count("provider_stream_continuation_completed"),
         "continuation_event_count": sum(1 for item in event_types if str(item or "").startswith("provider_stream_continuation_")),
     }
 
@@ -420,93 +424,52 @@ def run_model_tool_loop(
     allow_provider = bool(request.get("allow_model_tool_provider"))
     allow_write = bool(request.get("allow_model_tool_write"))
     approved = bool(request.get("approve_model_tools"))
-    fail_on_tool_error = bool(request.get("fail_on_model_tool_error", True))
-    use_stream = bool(request.get("stream_provider_tool_calls"))
-    incremental_stream = bool(request.get("incremental_stream_tool_execution"))
+    fail_on_error = bool(request.get("fail_on_model_tool_error"))
+    stream_followups = bool(request.get("stream_provider_tool_calls"))
+    incremental_stream_tools = bool(request.get("incremental_stream_tool_execution"))
     same_stream_tool_result_injection = bool(request.get("same_stream_tool_result_injection"))
-    current_response = initial_provider_response
-    current_request = {**foundation_request, "model_id": selected_model_id, "model": selected_model_id}
     rounds: list[dict[str, Any]] = []
-    for round_index in range(max_rounds):
+    current_response = initial_provider_response
+    used_tool_result_ids: set[str] = set()
+    for round_index in range(max(0, int(max_rounds))):
         tool_calls = extract_tool_calls(current_response)
         if not tool_calls:
-            break
-        preexecuted_results = incremental_result_map(current_response)
-        round_results: list[dict[str, Any]] = []
+            summary = {"status": "ok", "round_count": len(rounds), "rounds": rounds, "final_provider_response": current_response, "stream_provider_tool_calls": stream_followups, "incremental_stream_tool_execution": incremental_stream_tools, "same_stream_tool_result_injection": same_stream_tool_result_injection}
+            return finalize_model_tool_loop_summary(output_dir=output_dir, initial_provider_response=initial_provider_response, summary=summary, instances=instances, selected_model_id=selected_model_id)
+        preexecuted = incremental_result_map(current_response)
+        tool_results = []
         for tool_call in tool_calls:
-            result = preexecuted_results.get(str(tool_call.get("id")))
-            if result:
-                result = {**result, "source": "incremental_stream"}
+            if tool_call.get("id") in preexecuted:
+                result = preexecuted[tool_call["id"]]
+                used_tool_result_ids.add(tool_call["id"])
             else:
-                result = execute_tool_call(
-                    registry,
-                    tool_call,
-                    allow_provider=allow_provider,
-                    allow_write=allow_write,
-                    approved=approved,
-                )
-            round_results.append({"tool_call": tool_call, "result": result})
-            if result.get("status") != "ok" and fail_on_tool_error:
-                summary = {
-                    "rounds": rounds + [{"round": round_index + 1, "tool_results": round_results}],
-                    "status": "failed",
-                    "error": result.get("error"),
-                    "initial_provider_response": initial_provider_response,
-                    "stream_provider_tool_calls": use_stream,
-                    "incremental_stream_tool_execution": incremental_stream,
-                    "same_stream_tool_result_injection": same_stream_tool_result_injection,
-                }
-                return finalize_model_tool_loop_summary(
-                    output_dir=output_dir,
-                    initial_provider_response=initial_provider_response,
-                    summary=summary,
-                    instances=instances,
-                    selected_model_id=selected_model_id,
-                )
-        next_request = build_next_provider_request(current_request, selected_model_id, round_results)
-        next_request["dry_run"] = bool(request.get("dry_run_provider"))
-        next_request["stream_include_usage"] = request.get("stream_include_usage")
-        next_request["stream_options"] = request.get("stream_options")
-        next_response = generate_provider_round(
+                result = execute_tool_call(registry, tool_call, allow_provider=allow_provider, allow_write=allow_write, approved=approved)
+            tool_results.append({"tool_call": tool_call, "result": result})
+        round_info = {"round_index": round_index, "tool_calls": tool_calls, "tool_results": tool_results}
+        if fail_on_error and any(item["result"].get("status") == "failed" for item in tool_results):
+            summary = {"status": "failed", "round_count": len(rounds) + 1, "rounds": rounds + [round_info], "error": "model tool call failed", "stream_provider_tool_calls": stream_followups, "incremental_stream_tool_execution": incremental_stream_tools, "same_stream_tool_result_injection": same_stream_tool_result_injection}
+            return finalize_model_tool_loop_summary(output_dir=output_dir, initial_provider_response=initial_provider_response, summary=summary, instances=instances, selected_model_id=selected_model_id)
+        next_request = build_next_provider_request(foundation_request, selected_model_id, tool_results)
+        next_request.update({"dry_run_provider": request.get("dry_run_provider"), "base_url": request.get("base_url"), "api_key_env": request.get("api_key_env", "MODEL_API_KEY"), "stream_include_usage": request.get("stream_include_usage")})
+        current_response = generate_provider_round(
             next_request,
             instances,
             selected_model_id=selected_model_id,
             base_url=request.get("base_url"),
-            api_key_env=request.get("api_key_env") or "MODEL_API_KEY",
-            stream=use_stream,
-            stream_chunks_path=output_dir / f"model_tool_loop_stream_round_{round_index + 1}.jsonl" if use_stream else None,
-            incremental_tools=incremental_stream,
+            api_key_env=request.get("api_key_env", "MODEL_API_KEY"),
+            stream=stream_followups,
+            stream_chunks_path=output_dir / f"model_tool_loop_stream_round_{round_index + 1}.jsonl" if stream_followups else None,
+            incremental_tools=incremental_stream_tools,
             registry=registry,
-            incremental_tool_results_path=output_dir / f"model_tool_loop_incremental_round_{round_index + 1}.json" if use_stream and incremental_stream else None,
+            incremental_tool_results_path=output_dir / f"model_tool_loop_incremental_round_{round_index + 1}.json" if incremental_stream_tools else None,
             allow_provider=allow_provider,
             allow_write=allow_write,
             approved=approved,
             same_stream_tool_result_injection=same_stream_tool_result_injection,
         )
-        rounds.append(
-            {
-                "round": round_index + 1,
-                "tool_calls": tool_calls,
-                "tool_results": round_results,
-                "provider_response": next_response,
-            }
-        )
-        current_request = next_request
-        current_response = next_response
-    summary = {
-        "status": "ok",
-        "round_count": len(rounds),
-        "rounds": rounds,
-        "initial_provider_response": initial_provider_response,
-        "final_provider_response": current_response,
-        "stream_provider_tool_calls": use_stream,
-        "incremental_stream_tool_execution": incremental_stream,
-        "same_stream_tool_result_injection": same_stream_tool_result_injection,
-    }
-    return finalize_model_tool_loop_summary(
-        output_dir=output_dir,
-        initial_provider_response=initial_provider_response,
-        summary=summary,
-        instances=instances,
-        selected_model_id=selected_model_id,
-    )
+        if used_tool_result_ids:
+            round_info["reused_incremental_tool_result_ids"] = sorted(used_tool_result_ids)
+        round_info["provider_response"] = current_response
+        rounds.append(round_info)
+    summary = {"status": "failed", "round_count": len(rounds), "rounds": rounds, "error": "model tool loop exceeded max_rounds", "stream_provider_tool_calls": stream_followups, "incremental_stream_tool_execution": incremental_stream_tools, "same_stream_tool_result_injection": same_stream_tool_result_injection}
+    return finalize_model_tool_loop_summary(output_dir=output_dir, initial_provider_response=initial_provider_response, summary=summary, instances=instances, selected_model_id=selected_model_id)
