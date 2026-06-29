@@ -10,6 +10,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.events import AgentEventWriter, read_agent_events, summarize_agent_events, write_agent_event
 from agent.runtime import run_agent_once
+from agent.sqlite_run_store import sqlite_run_store
 
 
 class AgentEventsTests(unittest.TestCase):
@@ -33,6 +34,20 @@ class AgentEventsTests(unittest.TestCase):
             self.assertEqual(event["run_id"], "r1")
             self.assertEqual(event["session_id"], "s1")
             self.assertEqual(event["data"]["route_mode"], "balanced")
+
+    def test_event_writer_appends_to_sqlite_store(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = sqlite_run_store(Path(tmpdir) / "runs.sqlite3")
+            path = Path(tmpdir) / "events.jsonl"
+            writer = AgentEventWriter(path, {"run_id": "r1", "session_id": "s1", "owner_id": "u1", "project_id": "p1"}, store=store)
+            writer.emit("run_started", status="running")
+            writer.emit("run_completed", status="completed")
+
+            file_events = read_agent_events(path)
+            db_events = store.load_events("r1")
+            self.assertEqual([event["event_type"] for event in db_events], ["run_started", "run_completed"])
+            self.assertEqual([event["event_id"] for event in db_events], [event["event_id"] for event in file_events])
+            self.assertEqual(store.event_summary("r1")["terminal_event"]["event_type"], "run_completed")
 
     def test_disabled_event_writer_does_not_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -59,6 +74,22 @@ class AgentEventsTests(unittest.TestCase):
             self.assertIn("run_completed", event_types)
             self.assertIn("events", run["artifacts"])
             self.assertGreater(run["event_summary"]["event_count"], 0)
+
+    def test_run_agent_writes_events_to_sqlite_store(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "run"
+            store = sqlite_run_store(Path(tmpdir) / "runs.sqlite3")
+            run = run_agent_once(
+                PROJECT_ROOT,
+                {"run_id": "event-db-test", "task": "hello", "route_mode": "balanced", "approval_policy": "never"},
+                output_dir,
+                store=store,
+            )
+            self.assertEqual(run["status"], "completed")
+            db_event_types = {event["event_type"] for event in store.load_events("event-db-test")}
+            self.assertIn("run_created", db_event_types)
+            self.assertIn("run_completed", db_event_types)
+            self.assertEqual(run["event_summary"]["event_count"], len(store.load_events("event-db-test")))
 
     def test_run_agent_can_disable_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
