@@ -9,6 +9,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from agent.postgres_migration_history import MIGRATION_HISTORY_TABLE, migration_checksum
 from agent.postgres_run_store import (
     POSTGRES_RUN_STORE_REQUIRED_TABLES,
     POSTGRES_RUN_STORE_SCHEMA_SQL,
@@ -37,6 +38,7 @@ class PostgresRunStoreContractTests(unittest.TestCase):
             self.assertIn(f"create table if not exists {table}", migration)
         self.assertIn("jsonb", migration)
         self.assertIn("run_leases", migration)
+        self.assertIn("create table if not exists schema_migrations", migration)
 
     def test_split_sql_statements_handles_semicolons_in_strings(self) -> None:
         statements = split_sql_statements("SELECT ';' AS value; CREATE TABLE demo(id TEXT);")
@@ -48,6 +50,12 @@ class PostgresRunStoreContractTests(unittest.TestCase):
         plan = migration_plan(PROJECT_ROOT / "migrations" / "postgres_run_store.sql")
         self.assertGreaterEqual(plan["statement_count"], len(POSTGRES_RUN_STORE_REQUIRED_TABLES))
         self.assertEqual(plan["sql_path"], str(PROJECT_ROOT / "migrations" / "postgres_run_store.sql"))
+        self.assertEqual(plan["migration_id"], "postgres_run_store")
+        self.assertEqual(plan["history_table"], MIGRATION_HISTORY_TABLE)
+        self.assertEqual(plan["checksum"], migration_checksum(load_schema_sql(PROJECT_ROOT / "migrations" / "postgres_run_store.sql")))
+
+    def test_migration_checksum_is_stable_for_equivalent_trailing_space(self) -> None:
+        self.assertEqual(migration_checksum("SELECT 1;\n"), migration_checksum("SELECT 1;   \n"))
 
     def test_load_schema_sql_defaults_and_path(self) -> None:
         self.assertIn("CREATE TABLE IF NOT EXISTS runs", load_schema_sql())
