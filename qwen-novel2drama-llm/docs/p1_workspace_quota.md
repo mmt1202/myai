@@ -6,9 +6,13 @@ Implemented files:
 
 - `configs/auth/workspace_quotas.example.json`
 - `services/quota_store.py`
+- `services/postgres_quota_store.py`
 - `services/workspace_quota.py`
+- `migrations/postgres_quota_store.sql`
+- `requirements/postgres-quota.txt`
 - `tests/test_workspace_quota.py`
 - `tests/test_quota_store.py`
+- `tests/test_postgres_quota_store.py`
 
 Integrated files:
 
@@ -55,14 +59,15 @@ FOUNDATION_WORKSPACE_QUOTA_STATE=outputs/auth/workspace_quota_state.json
 Quota backend selection:
 
 ```text
-FOUNDATION_QUOTA_BACKEND=file|sqlite
+FOUNDATION_QUOTA_BACKEND=file|sqlite|postgres
 FOUNDATION_QUOTA_DB=outputs/auth/quota.sqlite
+FOUNDATION_QUOTA_POSTGRES_DSN=<configured outside git>
 ```
 
 Compatibility aliases:
 
 ```text
-FOUNDATION_WORKSPACE_QUOTA_BACKEND=file|sqlite
+FOUNDATION_WORKSPACE_QUOTA_BACKEND=file|sqlite|postgres
 FOUNDATION_WORKSPACE_QUOTA_DB=outputs/auth/quota.sqlite
 ```
 
@@ -109,18 +114,21 @@ Workspace overrides deep-merge with default limits.
 Implemented backends:
 
 ```text
-FileQuotaStore
-SQLiteQuotaStore
+FileQuotaStore      -> JSON files, default local backend
+SQLiteQuotaStore    -> local SQLite persistence
+PostgresQuotaStore  -> optional Postgres persistence v1
 ```
+
+Backend selection is unified as `file|sqlite|postgres`; aliases include `json` for file, `sqlite3` for SQLite, and `postgresql`/`pg` for Postgres. `FOUNDATION_QUOTA_BACKEND` is preferred, with compatibility fallbacks to `FOUNDATION_RATE_LIMIT_BACKEND` and `FOUNDATION_WORKSPACE_QUOTA_BACKEND`.
 
 Factory helpers:
 
 ```python
-build_quota_store(kind, rate_limit_state_path=..., workspace_quota_state_path=..., sqlite_path=...)
+build_quota_store(kind, rate_limit_state_path=..., workspace_quota_state_path=..., sqlite_path=..., postgres_dsn=...)
 quota_store_from_env(rate_limit_state_path=..., workspace_quota_state_path=...)
 ```
 
-SQLite tables:
+SQLite/Postgres tables:
 
 ```text
 rate_limit_buckets
@@ -142,6 +150,8 @@ monthly:YYYY-MM
 ```
 
 SQLite writes use `BEGIN IMMEDIATE` around counter updates so one process performs the update atomically within SQLite. This is still local-node SQLite, not a distributed quota service.
+
+Postgres uses row locking for quota counter updates and is intended for shared quota persistence. It is not a globally strongly-consistent cross-region limiter.
 
 ## Agent runtime behavior
 
@@ -178,7 +188,7 @@ workspace_quota_check.json
 workspace_quota_usage.json
 ```
 
-The quota backend stores daily/monthly counters and recent event metadata. In file mode, these remain in JSON state. In SQLite mode, counters go into `workspace_usage` and events go into `workspace_quota_events`.
+The quota backend stores daily/monthly counters and recent event metadata. In file mode, these remain in JSON state. In SQLite and Postgres modes, counters go into `workspace_usage` and events go into `workspace_quota_events`.
 
 ## CLI
 
@@ -216,6 +226,18 @@ python services/workspace_quota.py \
   --usage '{"total_tokens": 1000}'
 ```
 
+Use Postgres backend:
+
+```bash
+FOUNDATION_QUOTA_BACKEND=postgres \
+FOUNDATION_QUOTA_POSTGRES_DSN=<configured outside git> \
+python services/workspace_quota.py \
+  --config configs/auth/workspace_quotas.json \
+  --state outputs/auth/workspace_quota_state.json \
+  --workspace-id dev-workspace \
+  --usage '{"total_tokens": 1000}'
+```
+
 Agent CLI:
 
 ```bash
@@ -232,6 +254,7 @@ python agent/runtime.py \
 
 - SQLite backend is local-node SQLite, not a distributed quota service.
 - File backend remains process-local and has no cross-process lock.
+- Postgres backend is persistence v1, not a complete billing system or globally strongly-consistent distributed limiter.
 - Quota is currently integrated into Agent provider execution, not every `/v1/*` API endpoint.
 - Provider invoice or external billing reconciliation is not implemented.
 - Quota windows are calendar daily/monthly UTC windows, not custom rolling windows.
@@ -239,9 +262,9 @@ python agent/runtime.py \
 
 ## Next steps
 
-- Add Postgres/distributed quota backend.
 - Add API middleware-level quota checks for selected scopes.
 - Add workspace budget dashboards and rollups.
+- Add production quota observability and billing reconciliation.
 
 ## Postgres quota backend v1
 
@@ -249,4 +272,4 @@ T013 adds an optional Postgres-backed `QuotaStore` implementation for environmen
 
 The dependency profile is intentionally optional (`requirements/postgres-quota.txt`) so core CI does not connect to or require a real Postgres service. Real database tests are DSN-gated by `FOUNDATION_QUOTA_POSTGRES_DSN` and skip when the DSN is absent.
 
-Boundary: this backend is persistence v1 for quota decisions. It is not a complete billing system, not a globally coordinated distributed limiter with cross-region guarantees, and not production-grade billing/revenue accounting.
+Boundary: this backend is persistence v1 for quota decisions. It is not complete billing, not a globally strongly-consistent distributed rate limiter, and not a production-grade billing system.
