@@ -12,7 +12,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.events import write_agent_event
 from agent.postgres_run_store import PostgresRunStore, PostgresRunStoreUnavailable
-from agent.run_store import FileRunStore, RunNotFoundError, RunStoreError, build_run_store, default_sqlite_path, file_run_store, marker_for_cancel, normalize_run_store_kind
+from agent.run_store import FileRunStore, RunNotFoundError, build_run_store, default_sqlite_path, file_run_store, marker_for_cancel, normalize_run_store_kind
 from agent.runtime import run_agent_once, save_json
 from agent.sqlite_run_store import SQLiteRunStore
 
@@ -153,25 +153,33 @@ class RunStoreTests(unittest.TestCase):
             sqlite = build_run_store("sqlite", output_root, sqlite_path=output_root / "runs.db")
             self.assertIsInstance(sqlite, SQLiteRunStore)
             self.assertEqual(sqlite.metadata()["db_path"], str(output_root / "runs.db"))
-            postgres = build_run_store("postgres", output_root, postgres_dsn="postgresql://example")
+            postgres = build_run_store("postgres", output_root, postgres_dsn="configured")
             self.assertIsInstance(postgres, PostgresRunStore)
             self.assertEqual(postgres.metadata()["type"], "postgres")
+            self.assertEqual(postgres.metadata()["implementation_status"], "persistence_v1")
             self.assertTrue(postgres.metadata()["dsn_configured"])
 
-    def test_postgres_run_store_scaffold_does_not_connect_and_operations_fail_explicitly(self) -> None:
+    def test_postgres_run_store_core_contract_without_connection(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            store = PostgresRunStore("postgresql://example", output_root=Path(tmpdir))
+            store = PostgresRunStore("configured", output_root=Path(tmpdir))
             self.assertEqual(store.safe_run_id("demo"), "demo")
             self.assertEqual(store.run_dir("demo"), Path(tmpdir) / "demo")
-            self.assertEqual(store.metadata()["implementation_status"], "scaffold")
+            self.assertEqual(store.metadata()["implementation_status"], "persistence_v1")
+
+    def test_postgres_run_store_missing_dsn_fails_explicitly(self) -> None:
+        old = os.environ.pop("FOUNDATION_AGENT_RUN_POSTGRES_DSN", None)
+        try:
+            store = PostgresRunStore(output_root=Path("/tmp/out"))
+            self.assertFalse(store.metadata()["dsn_configured"])
             with self.assertRaises(PostgresRunStoreUnavailable):
-                store.status("demo")
-            with self.assertRaises(RunStoreError):
                 store.list_runs()
+        finally:
+            if old is not None:
+                os.environ["FOUNDATION_AGENT_RUN_POSTGRES_DSN"] = old
 
     def test_postgres_run_store_reads_dsn_from_env(self) -> None:
         old = os.environ.get("FOUNDATION_AGENT_RUN_POSTGRES_DSN")
-        os.environ["FOUNDATION_AGENT_RUN_POSTGRES_DSN"] = "postgresql://env-example"
+        os.environ["FOUNDATION_AGENT_RUN_POSTGRES_DSN"] = "configured-from-env"
         try:
             store = PostgresRunStore(output_root=Path("/tmp/out"))
             self.assertTrue(store.metadata()["dsn_configured"])
