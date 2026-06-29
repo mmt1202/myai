@@ -7,10 +7,12 @@ Implemented files:
 - `services/auth.py`
 - `services/auth_audit.py`
 - `services/rate_limiter.py`
+- `services/quota_store.py`
 - `configs/auth/api_keys.example.json`
 - `configs/auth/rate_limits.example.json`
 - `tests/test_auth_service.py`
 - `tests/test_auth_audit_rate_limit.py`
+- `tests/test_quota_store.py`
 - `inference/api_server.py`
 
 ## Default mode
@@ -107,6 +109,7 @@ The wildcard scope `*` grants all scopes.
 `agent:run` covers:
 
 - `POST /v1/agent/run`
+- `GET /v1/agent/runs`
 - `GET /v1/agent/events`
 - `GET /v1/agent/status`
 - `POST /v1/agent/cancel`
@@ -169,6 +172,22 @@ Example config:
 }
 ```
 
+Backend selection:
+
+```text
+FOUNDATION_QUOTA_BACKEND=file|sqlite
+FOUNDATION_QUOTA_DB=outputs/auth/quota.sqlite
+```
+
+Compatibility aliases:
+
+```text
+FOUNDATION_RATE_LIMIT_BACKEND=file|sqlite
+FOUNDATION_RATE_LIMIT_DB=outputs/auth/quota.sqlite
+```
+
+Default backend is `file`, preserving the previous `FOUNDATION_RATE_LIMIT_STATE` JSON behavior. SQLite backend stores counters in `rate_limit_buckets` with one row per API key/scope/workspace bucket.
+
 When enabled, responses include rate limit headers:
 
 ```text
@@ -177,6 +196,8 @@ X-RateLimit-Remaining
 X-RateLimit-Reset
 Retry-After
 ```
+
+The failure envelope includes `error.details.quota_store` so operators can see whether the file or SQLite backend made the rate limit decision.
 
 ## Public endpoints
 
@@ -191,9 +212,8 @@ These endpoints do not require API keys even when auth is enabled:
 
 - This is API key based auth, not full OAuth/OIDC.
 - Key store is file based.
-- Rate limit state is file based.
-- Agent lifecycle APIs are protected by scope but still use file-backed run state.
-- No distributed rate limiting yet.
+- File rate limit backend is process-local and has no cross-process lock.
+- SQLite rate limit backend is local-node SQLite, not a distributed rate limit service.
 - No key rotation workflow yet.
 - No request body workspace binding yet.
 - No per-provider or per-model quota enforcement yet.
@@ -202,5 +222,5 @@ These endpoints do not require API keys even when auth is enabled:
 
 - Add API key generation and rotation helper.
 - Add request-body workspace binding.
-- Add distributed rate limiting backend.
+- Add Postgres/distributed rate limiting backend.
 - Add provider/model quota checks.
