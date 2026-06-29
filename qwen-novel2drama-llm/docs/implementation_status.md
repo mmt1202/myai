@@ -20,7 +20,11 @@
 - `docs/FOUNDATION_BOUNDARY.md`：Foundation 与 ForgePilot 职责边界已固定。
 - `scripts/run_checks.py`：核心目录 compile、skills validate、MCP validate、router smoke 已纳入检查。
 - `docs/FOUNDATION_RELEASE_CHECKLIST.md`：稳定发布检查清单已补齐。
-- `docs/MEMORY_ROADMAP.md`：Memory JSONL 当前边界与 SQLite/vector 后续路线已记录。
+- `services/sqlite_memory_store.py`：SQLite memory backend 已完成。
+- `services/vector_memory_store.py`：deterministic vector memory backend 已完成。
+- `services/memory_store.py`：`FOUNDATION_MEMORY_BACKEND=file|sqlite|vector` backend selection 已完成。
+- `inference/api_server.py`：Memory API 已接入 selectable backend，readiness 暴露 `memory_backend`。
+- `docs/MEMORY_ROADMAP.md`：Memory 后端状态、API 兼容和后续路线已更新。
 
 ### P2 Foundation
 
@@ -60,6 +64,10 @@ P1_foundation_boundary_documented_v1 = true
 P1_run_checks_core_coverage_implemented_v1 = true
 P1_foundation_release_checklist_implemented_v1 = true
 P1_memory_roadmap_documented_v1 = true
+P1_sqlite_memory_backend_implemented_v1 = true
+P1_vector_memory_backend_implemented_v1 = true
+P1_memory_backend_selection_implemented_v1 = true
+P1_memory_api_backend_selection_implemented_v1 = true
 P2_foundation_capabilities_implemented_v1 = true
 P3_novel_parsing_implemented_v1 = true
 P3_novel_to_drama_outline_implemented_v1 = true
@@ -78,19 +86,20 @@ implementation_completed = false
 
 ## 当前最重要的未完成项
 
-1. Kubernetes / Terraform。
-2. AWS/GCP/Azure/Vault managed secret manager。
-3. 真实证书、域名、WAF、CDN。
-4. Prometheus/Grafana/SLO 告警部署。
-5. 真实备份策略和 RPO/RTO 演练。
-6. 外部 MQ / 跨区域调度。
-7. 真实 billing invoice import/export integrations。
-8. 平台专属媒体生成网关、资产托管、审核流、人工复核工作台。
-9. SQLite/vector memory backend 实现。
-10. 大规模 golden dataset 与质量门禁。
+1. 大规模 golden dataset 与质量门禁。
+2. Kubernetes / Terraform。
+3. AWS/GCP/Azure/Vault managed secret manager。
+4. 真实证书、域名、WAF、CDN。
+5. Prometheus/Grafana/SLO 告警部署。
+6. 真实备份策略和 RPO/RTO 演练。
+7. 外部 MQ / 跨区域调度。
+8. 真实 billing invoice import/export integrations。
+9. 平台专属媒体生成网关、资产托管、审核流、人工复核工作台。
+10. Memory duplicate/contradiction/merge/compression 高级治理。
 
 ## 禁止误判
 
+- SQLite/vector memory backend 完成，不等于外部向量数据库、真实 embedding provider 和高级记忆治理已经完成。
 - 直接图片/视频生成 adapter 完成，不等于具体第三方平台账号、端点、额度和平台侧参数已经配置。
 - P3 pipeline 完成，不等于已经生成最终成片。
 - Media generation job client 完成，不等于资产 CDN、版权检查、审核流和人工复核系统完成。
