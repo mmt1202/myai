@@ -1,4 +1,59 @@
 {
-  "active_version": null,
-  "versions": []
+  "active_version": "local-qwen2_5-1_5b-instruct-dev-v1",
+  "version_policy": {
+    "channels": ["dev", "stable", "experimental"],
+    "default_channel": "dev",
+    "stable_required_checks": ["run_checks", "api_smoke", "foundation_contract"],
+    "notes": "Model version records are deployment manifests. Paths may be overridden by environment variables in runtime profiles."
+  },
+  "versions": [
+    {
+      "version": "local-qwen2_5-1_5b-instruct-dev-v1",
+      "model_id": "local.qwen2_5_1_5b_instruct",
+      "provider": "local",
+      "channel": "dev",
+      "status": "active",
+      "base_model": {
+        "name": "Qwen2.5-1.5B-Instruct",
+        "path_env": "FOUNDATION_LOCAL_MODEL_PATH",
+        "default_path": "models/Qwen2.5-1.5B-Instruct"
+      },
+      "adapter": {
+        "type": "lora",
+        "path_env": "FOUNDATION_LOCAL_ADAPTER_PATH",
+        "default_path": null,
+        "required": false
+      },
+      "capabilities": ["text.chat", "text.reason", "tool.calling", "drama.story_reasoning"],
+      "created_at": "2026-06-29",
+      "training_run_id": null,
+      "dataset_version": null,
+      "eval_report": null,
+      "notes": "Default local development model version for Foundation runtime."
+    },
+    {
+      "version": "local-qwen2_5-1_5b-instruct-stable-placeholder",
+      "model_id": "local.qwen2_5_1_5b_instruct",
+      "provider": "local",
+      "channel": "stable",
+      "status": "candidate",
+      "base_model": {
+        "name": "Qwen2.5-1.5B-Instruct",
+        "path_env": "FOUNDATION_LOCAL_MODEL_PATH",
+        "default_path": "models/Qwen2.5-1.5B-Instruct"
+      },
+      "adapter": {
+        "type": "lora",
+        "path_env": "FOUNDATION_LOCAL_ADAPTER_PATH",
+        "default_path": null,
+        "required": false
+      },
+      "capabilities": ["text.chat", "text.reason", "tool.calling"],
+      "created_at": "2026-06-29",
+      "training_run_id": null,
+      "dataset_version": null,
+      "eval_report": null,
+      "notes": "Promote to stable only after release checklist passes."
+    }
+  ]
 }
