@@ -34,6 +34,7 @@ class CIProfilesTests(unittest.TestCase):
             "tests.test_deploy_profile",
             "tests.test_drama_pipeline",
             "tests.test_drama_api",
+            "tests.test_media_generation",
             "tests.test_run_store",
             "tests.test_sqlite_run_store",
             "tests.test_agent_lifecycle",
