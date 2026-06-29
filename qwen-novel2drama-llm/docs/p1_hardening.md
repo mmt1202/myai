@@ -6,19 +6,30 @@ This document tracks production hardening work after the P1 foundation runtime w
 
 - `inference/api_server.py`
 - `providers/session_lifecycle.py`
+- `services/secret_resolver.py`
+- `services/metrics.py`
+- `agent/worker_pool.py`
 - `agent/postgres_db_ops.py`
+- `scripts/postgres_backup.py`
+- `scripts/production_preflight.py`
 - `services/billing_limits.py`
 - `Dockerfile`
 - `compose.production.yml`
 - `configs/deploy/production.example.env`
+- `configs/deploy/nginx.tls.example.conf`
 - `tests/test_api_server_foundation.py`
 - `tests/test_provider_session_lifecycle.py`
+- `tests/test_secret_resolver.py`
+- `tests/test_metrics.py`
+- `tests/test_worker_pool.py`
 - `tests/test_postgres_db_ops.py`
+- `tests/test_postgres_backup.py`
+- `tests/test_production_preflight.py`
 - `tests/test_billing_limits.py`
 
 ## H001 API middleware-level quota checks
 
-`inference/api_server.py` now includes an API-level workspace quota preflight in the HTTP middleware.
+`inference/api_server.py` includes an API-level workspace quota preflight in the HTTP middleware.
 
 Configuration:
 
@@ -36,8 +47,6 @@ Behavior:
 - returns `workspace_quota_exceeded` with quota headers when denied
 - records request-level usage after successful responses
 
-Boundary: this is API request-level quota enforcement. It is not full billing and does not replace provider actual-usage reconciliation.
-
 ## H002 Production deployment profile
 
 Production-like deployment artifacts:
@@ -46,17 +55,28 @@ Production-like deployment artifacts:
 Dockerfile
 compose.production.yml
 configs/deploy/production.example.env
+configs/deploy/nginx.tls.example.conf
 ```
 
 The deployment profile includes:
 
 - API container
+- worker pool profile
+- preflight profile
+- optional nginx TLS reverse proxy profile
 - Postgres service
 - persistent `outputs` volume
-- root `/v1/ready` healthcheck
+- `/v1/ready` healthcheck
 - Postgres-backed run store/quota store env template
 
-Boundary: this is a production-like profile, not a complete cloud deployment, autoscaling, TLS, secret manager or backup system.
+Commands:
+
+```bash
+docker compose -f compose.production.yml --profile preflight run --rm preflight
+docker compose -f compose.production.yml up api postgres
+docker compose -f compose.production.yml --profile worker up worker
+docker compose -f compose.production.yml --profile tls up nginx
+```
 
 ## H003 Health checks / readiness checks
 
@@ -77,13 +97,9 @@ Deep readiness checks include:
 - provider registry availability
 - queue summary
 
-Boundary: readiness reports component health; it does not perform destructive DB probes or real provider calls.
-
 ## H004 Pool health checks
 
 Postgres run store pool metadata is surfaced through the run store component in `/v1/ready` and `/v1/health/deep`.
-
-Boundary: pool status is metadata/readiness level. It is not a full connection-pool metrics exporter.
 
 ## H005 Queue observability
 
@@ -100,8 +116,6 @@ Returns:
 - queued/running/failed/completed/cancelled samples
 - dead-letter count
 
-Boundary: this is queue observability for the internal dispatcher. It is not an external message queue UI or worker-pool orchestrator.
-
 ## H006 Provider session lifecycle hardening
 
 `providers/session_lifecycle.py` defines:
@@ -111,8 +125,6 @@ Boundary: this is queue observability for the internal dispatcher. It is not an 
 - lifecycle transition validation
 - session health summary
 
-Boundary: this is a lifecycle contract used by provider session adapters. It does not own browser, WebRTC, SIP or audio-device session setup.
-
 ## H007 Migration rollback / DB ops hardening
 
 `agent/postgres_db_ops.py` defines:
@@ -121,7 +133,7 @@ Boundary: this is a lifecycle contract used by provider session adapters. It doe
 - manual rollback plan generation
 - DB ops health summary
 
-Boundary: rollback is intentionally manual-review only. The project records migration history and plans rollback but does not execute automatic down migrations.
+`script/postgres_backup.py` provides backup and restore command planning and optional execution without printing DSN values.
 
 ## H008 Billing / global rate limit hardening
 
@@ -131,10 +143,58 @@ Boundary: rollback is intentionally manual-review only. The project records migr
 - global rate-limit health summary
 - billing reconciliation status
 
-Boundary: Postgres quota provides shared persistence for quota decisions, not complete billing, invoice reconciliation, or globally strongly-consistent distributed rate limiting.
+## H009 Secret management contract
+
+`services/secret_resolver.py` supports production-safe secret references:
+
+```text
+env:NAME
+file:/path/to/secret
+literal:development-only-value
+```
+
+Raw secret values are rejected by default. Health checks can report whether secret references are configured without printing secret values.
+
+## H010 Metrics exporter contract
+
+`services/metrics.py` provides a lightweight Prometheus text renderer and runtime metric sample contract for readiness and queue metrics.
+
+## H011 Worker pool
+
+`agent/worker_pool.py` runs repeated dispatcher iterations over the internal queue with configurable worker count, idle stop and lease settings.
+
+## H012 Backup / restore automation
+
+`scripts/postgres_backup.py` provides:
+
+```bash
+python scripts/postgres_backup.py backup --path outputs/backups/foundation.dump
+python scripts/postgres_backup.py restore --path outputs/backups/foundation.dump
+```
+
+Default behavior is planning only. `--execute` runs `pg_dump` or `pg_restore` using a configured DSN env var without printing the DSN.
+
+## H013 Production preflight
+
+`scripts/production_preflight.py` verifies:
+
+- required production files exist
+- hardening flags are present in `docs/implementation_status.md`
+- env template does not contain unsafe secret values
+
+## H014 TLS / reverse proxy template
+
+`configs/deploy/nginx.tls.example.conf` provides a TLS reverse proxy template for `/`, `/health`, `/v1/ready` and `/metrics`.
+
+## Current boundaries
+
+- This is a complete repository-level hardening loop, not a managed cloud platform.
+- TLS material, real secrets, backups and autoscaling must be provided by the deployment environment.
+- Global strong consistency still requires external limiter/database operational guarantees.
+- Provider realtime browser/WebRTC/SIP connection ownership is still outside the foundation process.
 
 ## Suggested tests
 
 ```bash
-python -m unittest tests.test_api_server_foundation tests.test_provider_session_lifecycle tests.test_postgres_db_ops tests.test_billing_limits tests.test_ci_profiles
+python -m unittest tests.test_api_server_foundation tests.test_provider_session_lifecycle tests.test_secret_resolver tests.test_metrics tests.test_worker_pool tests.test_postgres_db_ops tests.test_postgres_backup tests.test_production_preflight tests.test_billing_limits tests.test_ci_profiles
 ```
