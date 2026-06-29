@@ -27,6 +27,7 @@ from agent.events import summarize_agent_events
 from agent.lifecycle import cancel_run, resume_run, retry_run, status_run
 from agent.run_store import RunStore, build_run_store, default_sqlite_path
 from agent.runtime import run_agent_once
+from agent.worker_dispatcher import list_queue
 from inference.model_router import route_model
 from mcp.adapter import FoundationMCPAdapter
 from providers.base import ProviderError, provider_stream_event, response_envelope
@@ -35,9 +36,11 @@ from services.auth import AuthError, auth_required_from_env, build_auth_context,
 from services.auth_audit import write_auth_event
 from services.cost_estimator import estimate_request_cost, instance_by_id
 from services.memory_store import search_memory, write_memory
+from services.quota_store import quota_store_from_env
 from services.rate_limiter import RateLimitError, check_rate_limit, load_json as load_rate_limit_json, rate_limit_config_path_from_env, rate_limit_enabled_from_env, rate_limit_state_path_from_env
 from services.rule_engine import evaluate_rules, load_rules
 from services.token_counter import estimate_request_usage
+from services.workspace_quota import check_workspace_quota_from_paths, quota_config_path_from_env, quota_state_path_from_env, record_workspace_usage_to_path
 from skills.registry import SkillError, call_skill, list_skills, load_json
 
 app = FastAPI(title="MyAI Foundation API", version="0.1.0")
@@ -61,6 +64,13 @@ class GenerateRequest(BaseModel):
 class GenerateResponse(BaseModel):
     result: str
     model_version: str | None = None
+
+
+def bool_from_env(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def model_utils_module() -> Any:
@@ -152,7 +162,7 @@ def load_agent_events_from_store(run_id: str) -> tuple[list[dict[str, Any]], dic
         return [], metadata, "missing_run"
     except ValueError:
         raise
-    except Exception:  # noqa: BLE001
+    except Exception:
         return [], metadata, "run_store_error"
 
 
@@ -188,7 +198,7 @@ def stream_provider_sse(chunks: Iterator[dict[str, Any]]) -> Iterator[str]:
             yield provider_sse_event(chunk)
     except ProviderError as exc:
         yield provider_sse_event(provider_stream_event("provider_stream_failed", error=exc.to_error(), done=True))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         yield provider_sse_event(provider_stream_event("provider_stream_failed", error={"code": "provider_error", "message": str(exc), "retryable": False, "details": {}}, done=True))
 
 
@@ -218,8 +228,74 @@ def emit_auth_audit(request: Request, *, decision: str, status_code: int, reason
     context = auth_context or getattr(request.state, "auth_context", {}) or {}
     try:
         write_auth_event(AUTH_AUDIT_PATH, {"event_type": "api_request", "decision": decision, "key_id": context.get("key_id"), "owner_id": context.get("owner_id"), "workspace_id": context.get("workspace_id"), "required_scope": context.get("required_scope"), "method": request.method, "path": request.url.path, "status_code": status_code, "reason": reason, "client_host": client_host(request), "metadata": metadata or {}})
-    except Exception:  # noqa: BLE001
+    except Exception:
         return
+
+
+def api_quota_enabled_from_env() -> bool:
+    return bool_from_env("FOUNDATION_API_QUOTA_ENABLED", False) or bool_from_env("FOUNDATION_API_WORKSPACE_QUOTA_ENABLED", False)
+
+
+def api_quota_paths_from_env() -> list[str]:
+    raw = os.environ.get("FOUNDATION_API_QUOTA_PATHS") or "/v1/chat,/v1/reason,/v1/multimodal/analyze,/v1/agent/run"
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def api_quota_applies(path: str, method: str = "POST") -> bool:
+    if method.upper() not in {"POST", "PUT", "PATCH"}:
+        return False
+    configured = api_quota_paths_from_env()
+    if "*" in configured or "/v1/*" in configured:
+        return path.startswith("/v1/") and not path.startswith("/v1/health")
+    return any(path == item or path.startswith(item.rstrip("*") if item.endswith("*") else item + "/") for item in configured)
+
+
+def api_quota_workspace_id(request: Request, body: dict[str, Any], auth_context: dict[str, Any] | None) -> str:
+    return str(request.headers.get("X-Workspace-Id") or body.get("workspace_id") or (auth_context or {}).get("workspace_id") or "default")
+
+
+def api_quota_usage(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    usage = body.get("usage") if isinstance(body.get("usage"), dict) else estimate_request_usage(body, expected_output_tokens=int(body.get("expected_output_tokens") or body.get("max_output_tokens") or 512))
+    cost = body.get("cost") if isinstance(body.get("cost"), dict) else {}
+    return usage, cost
+
+
+def api_quota_headers(report: dict[str, Any]) -> dict[str, str]:
+    quota_store = report.get("quota_store") or {}
+    return {"X-WorkspaceQuota-Decision": str(report.get("decision") or "unknown"), "X-WorkspaceQuota-Store": str(quota_store.get("type") or "unknown")}
+
+
+async def api_quota_preflight(request: Request, auth_context: dict[str, Any] | None) -> dict[str, Any] | JSONResponse | None:
+    if not api_quota_enabled_from_env() or not api_quota_applies(request.url.path, request.method):
+        return None
+    try:
+        raw_body = await request.body()
+        body = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        if not isinstance(body, dict):
+            body = {}
+    except Exception:
+        body = {}
+    workspace_id = api_quota_workspace_id(request, body, auth_context)
+    usage, cost = api_quota_usage(body)
+    report = check_workspace_quota_from_paths(config_path=quota_config_path_from_env(PROJECT_ROOT), state_path=quota_state_path_from_env(PROJECT_ROOT), workspace_id=workspace_id, usage=usage, cost=cost)
+    request.state.api_quota = report
+    request.state.api_quota_usage = usage
+    request.state.api_quota_cost = cost
+    request.state.api_quota_workspace_id = workspace_id
+    if not report.get("allowed"):
+        content = response_envelope(status="failed", output={"workspace_quota": report}, error={"code": "workspace_quota_exceeded", "message": "workspace quota exceeded", "retryable": True, "details": report})
+        return JSONResponse(status_code=429, content=content, headers=api_quota_headers(report))
+    return report
+
+
+def record_api_quota_usage_if_needed(request: Request, response_status_code: int) -> dict[str, Any] | None:
+    report = getattr(request.state, "api_quota", None)
+    if not report or response_status_code >= 400:
+        return None
+    try:
+        return record_workspace_usage_to_path(state_path=quota_state_path_from_env(PROJECT_ROOT), workspace_id=getattr(request.state, "api_quota_workspace_id", None), usage=getattr(request.state, "api_quota_usage", None), cost=getattr(request.state, "api_quota_cost", None), metadata={"path": request.url.path, "method": request.method, "request_id": request.headers.get("X-Request-Id")})
+    except Exception:
+        return None
 
 
 @app.middleware("http")
@@ -229,6 +305,7 @@ async def foundation_auth_middleware(request: Request, call_next):  # type: igno
         return await call_next(request)
     auth_context: dict[str, Any] | None = None
     rate_limit_result: dict[str, Any] | None = None
+    api_quota_result: dict[str, Any] | None = None
     try:
         store = load_key_store(key_store_path_from_env(PROJECT_ROOT))
         auth_context = build_auth_context(method=request.method, path=path, api_key=request.headers.get("X-API-Key"), workspace_id=request.headers.get("X-Workspace-Id"), store=store, auth_required=auth_required_from_env())
@@ -249,6 +326,13 @@ async def foundation_auth_middleware(request: Request, call_next):  # type: igno
             headers = {"Retry-After": str(exc.retry_after_seconds), "X-RateLimit-Limit": str(exc.limit), "X-RateLimit-Remaining": str(exc.remaining), "X-RateLimit-Reset": str(exc.reset_at)}
             return JSONResponse(status_code=429, content=content, headers=headers)
 
+    quota_preflight = await api_quota_preflight(request, auth_context)
+    if isinstance(quota_preflight, JSONResponse):
+        emit_auth_audit(request, decision="quota_denied", status_code=429, reason="workspace_quota_exceeded", auth_context=auth_context, metadata={"workspace_quota": getattr(request.state, "api_quota", {})})
+        return quota_preflight
+    if isinstance(quota_preflight, dict):
+        api_quota_result = quota_preflight
+
     response = await call_next(request)
     key_id = str((auth_context or {}).get("key_id") or "")
     if key_id:
@@ -257,8 +341,54 @@ async def foundation_auth_middleware(request: Request, call_next):  # type: igno
         response.headers["X-RateLimit-Limit"] = str(rate_limit_result.get("limit"))
         response.headers["X-RateLimit-Remaining"] = str(rate_limit_result.get("remaining"))
         response.headers["X-RateLimit-Reset"] = str(rate_limit_result.get("reset_at"))
-    emit_auth_audit(request, decision="allowed", status_code=response.status_code, auth_context=auth_context, metadata={"rate_limit": rate_limit_result or {}})
+    if api_quota_result:
+        for key, value in api_quota_headers(api_quota_result).items():
+            response.headers[key] = value
+        record_api_quota_usage_if_needed(request, response.status_code)
+    emit_auth_audit(request, decision="allowed", status_code=response.status_code, auth_context=auth_context, metadata={"rate_limit": rate_limit_result or {}, "api_quota": api_quota_result or {}})
     return response
+
+
+def health_components() -> dict[str, Any]:
+    components: dict[str, Any] = {}
+    components["local_model"] = {"status": "ok" if (TOKENIZER is not None and MODEL is not None) else "degraded", "model_version": ACTIVE_MODEL_VERSION, "model_path": ACTIVE_MODEL_PATH}
+    try:
+        components["run_store"] = {"status": "ok", "metadata": agent_run_store().metadata()}
+    except Exception as exc:
+        components["run_store"] = {"status": "failed", "error": str(exc)}
+    try:
+        components["quota_backend"] = {"status": "ok", "metadata": quota_store_from_env(rate_limit_state_path=rate_limit_state_path_from_env(PROJECT_ROOT), workspace_quota_state_path=quota_state_path_from_env(PROJECT_ROOT)).metadata()}
+    except Exception as exc:
+        components["quota_backend"] = {"status": "failed", "error": str(exc)}
+    try:
+        instances = model_instances().get("instances") or []
+        components["provider_registry"] = {"status": "ok", "instance_count": len(instances)}
+    except Exception as exc:
+        components["provider_registry"] = {"status": "failed", "error": str(exc)}
+    try:
+        components["queue"] = {"status": "ok", "summary": queue_summary()}
+    except Exception as exc:
+        components["queue"] = {"status": "failed", "error": str(exc)}
+    return components
+
+
+def readiness_report() -> dict[str, Any]:
+    components = health_components()
+    failed = [name for name, item in components.items() if item.get("status") == "failed"]
+    return {"status": "ok" if not failed else "degraded", "service": "myai-foundation", "components": components, "failed_components": failed}
+
+
+def queue_summary(limit: int = 50) -> dict[str, Any]:
+    store = agent_run_store()
+    statuses = ["queued", "running", "failed", "completed", "cancelled"]
+    counts: dict[str, int] = {}
+    samples: dict[str, list[dict[str, Any]]] = {}
+    for status in statuses:
+        result = store.list_runs(status=status, limit=limit, offset=0, order="asc" if status == "queued" else "desc")
+        counts[status] = int(result.get("total") or 0)
+        samples[status] = result.get("runs") or []
+    dead_letter = [item for item in samples.get("failed", []) if ((item.get("queue") or {}).get("status") == "dead_letter")]
+    return {"run_store": store.metadata(), "counts": counts, "dead_letter_count": len(dead_letter), "samples": samples}
 
 
 @app.get("/health")
@@ -268,7 +398,17 @@ def health() -> dict[str, str | None]:
 
 @app.get("/v1/health")
 def foundation_health() -> dict[str, Any]:
-    return {"status": "ok", "service": "myai-foundation", "model_version": ACTIVE_MODEL_VERSION, "model_path": ACTIVE_MODEL_PATH, "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "agent_run_store", "agent_run_query", "agent_db_events", "provider", "provider_stream", "auth", "rate_limit", "audit"]}
+    return {"status": "ok", "service": "myai-foundation", "model_version": ACTIVE_MODEL_VERSION, "model_path": ACTIVE_MODEL_PATH, "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "agent_run_store", "agent_run_query", "agent_db_events", "provider", "provider_stream", "auth", "rate_limit", "workspace_quota", "api_quota", "queue_observability", "readiness", "audit"]}
+
+
+@app.get("/v1/ready")
+def readiness_api() -> dict[str, Any]:
+    return readiness_report()
+
+
+@app.get("/v1/health/deep")
+def deep_health_api() -> dict[str, Any]:
+    return readiness_report()
 
 
 @app.post("/generate", response_model=GenerateResponse)
@@ -277,7 +417,7 @@ def generate_api(request: GenerateRequest) -> GenerateResponse:
         raise HTTPException(status_code=503, detail="model is not loaded")
     try:
         result = generate_text_runtime(TOKENIZER, MODEL, request.prompt, request.max_new_tokens, request.temperature, SYSTEM_PROMPT)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(status_code=500, detail=f"generation failed: {exc}") from exc
     return GenerateResponse(result=result, model_version=ACTIVE_MODEL_VERSION)
 
@@ -375,6 +515,12 @@ def agent_runs_api(status: str | None = None, owner_id: str | None = None, proje
         return ok(body, result)
     except ValueError as exc:
         return failed(body, "invalid_agent_run_query", str(exc))
+
+
+@app.get("/v1/agent/queue")
+def agent_queue_api(limit: int = 50) -> dict[str, Any]:
+    body = {"request_id": "agent_queue"}
+    return ok(body, queue_summary(limit=limit))
 
 
 @app.get("/v1/agent/events")
@@ -497,7 +643,7 @@ def main() -> int:
             TOKENIZER, MODEL, _ = load_model_runtime(model_path, adapter_path)
             ACTIVE_MODEL_VERSION = version
             ACTIVE_MODEL_PATH = model_path
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"service startup failed: {exc}")
             return 1
     uvicorn.run(app, host=args.host, port=args.port)
