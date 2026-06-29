@@ -37,19 +37,7 @@ def load_run_report(output_root: Path, run_id: str) -> dict[str, Any]:
 
 def original_request_from_report(report: dict[str, Any]) -> dict[str, Any]:
     request: dict[str, Any] = {}
-    for key in [
-        "run_id",
-        "session_id",
-        "owner_id",
-        "project_id",
-        "workspace_id",
-        "task",
-        "input",
-        "route_mode",
-        "approval_policy",
-        "usage",
-        "cost",
-    ]:
+    for key in ["run_id", "session_id", "owner_id", "project_id", "workspace_id", "task", "input", "route_mode", "approval_policy", "usage", "cost"]:
         if report.get(key) is not None:
             request[key] = deepcopy(report[key])
     if report.get("route_decision"):
@@ -104,21 +92,31 @@ def cancel_run(output_root: Path, run_id: str, *, reason: str | None = None, req
         report["cancelled"] = marker
         report["updated_at"] = marker["created_at"]
         report["completed_at"] = marker["created_at"]
-        report.setdefault("steps", []).append(
-            {
-                "step_id": f"step_{uuid.uuid4().hex}",
-                "type": "cancel_request",
-                "status": "cancelled",
-                "input": {},
-                "output": marker,
-                "error": marker["reason"],
-                "created_at": marker["created_at"],
-                "updated_at": marker["created_at"],
-            }
-        )
+        report.setdefault("steps", []).append({"step_id": f"step_{uuid.uuid4().hex}", "type": "cancel_request", "status": "cancelled", "input": {}, "output": marker, "error": marker["reason"], "created_at": marker["created_at"], "updated_at": marker["created_at"]})
         active_store.save_report(safe_id, report)
         write_lifecycle_event(output_root, safe_id, report, "run_cancelled", status="cancelled", message=marker["reason"], data={"cancel": marker}, store=active_store)
     return {"run_id": safe_id, "previous_status": previous_status, "status": report.get("status"), "cancel": marker, "run": report, "run_store": active_store.metadata()}
+
+
+def claim_run(output_root: Path, run_id: str, worker_id: str, *, lease_seconds: int = 60, store: RunStore | None = None) -> dict[str, Any]:
+    active_store = store or file_run_store(output_root)
+    return {"action": "claim", **active_store.claim_run(run_id, worker_id, lease_seconds=lease_seconds)}
+
+
+def renew_lease(output_root: Path, run_id: str, worker_id: str, *, lease_seconds: int = 60, store: RunStore | None = None) -> dict[str, Any]:
+    active_store = store or file_run_store(output_root)
+    return {"action": "renew_lease", **active_store.renew_lease(run_id, worker_id, lease_seconds=lease_seconds)}
+
+
+def release_run(output_root: Path, run_id: str, worker_id: str, *, store: RunStore | None = None) -> dict[str, Any]:
+    active_store = store or file_run_store(output_root)
+    return {"action": "release", **active_store.release_run(run_id, worker_id)}
+
+
+def expired_leases(output_root: Path, store: RunStore | None = None) -> dict[str, Any]:
+    active_store = store or file_run_store(output_root)
+    leases = active_store.find_expired_leases()
+    return {"action": "expired_leases", "expired_leases": leases, "total": len(leases), "run_store": active_store.metadata()}
 
 
 def next_child_run_id(source_run_id: str, action: str) -> str:
@@ -137,15 +135,7 @@ def restart_request(source_run_id: str, original_request: dict[str, Any], *, act
     return request
 
 
-def retry_run(
-    *,
-    project_root: Path,
-    output_root: Path,
-    run_id: str,
-    new_run_id: str | None = None,
-    overrides: dict[str, Any] | None = None,
-    store: RunStore | None = None,
-) -> dict[str, Any]:
+def retry_run(*, project_root: Path, output_root: Path, run_id: str, new_run_id: str | None = None, overrides: dict[str, Any] | None = None, store: RunStore | None = None) -> dict[str, Any]:
     active_store = store or file_run_store(output_root)
     safe_id = active_store.safe_run_id(run_id)
     original = load_original_request(output_root, safe_id, active_store)
@@ -157,16 +147,7 @@ def retry_run(
     return {"action": "retry", "source_run_id": safe_id, "new_run_id": child_id, "run": run, "run_store": active_store.metadata()}
 
 
-def resume_run(
-    *,
-    project_root: Path,
-    output_root: Path,
-    run_id: str,
-    new_run_id: str | None = None,
-    overrides: dict[str, Any] | None = None,
-    allow_completed: bool = False,
-    store: RunStore | None = None,
-) -> dict[str, Any]:
+def resume_run(*, project_root: Path, output_root: Path, run_id: str, new_run_id: str | None = None, overrides: dict[str, Any] | None = None, allow_completed: bool = False, store: RunStore | None = None) -> dict[str, Any]:
     active_store = store or file_run_store(output_root)
     safe_id = active_store.safe_run_id(run_id)
     report = active_store.load_report(safe_id)
@@ -188,7 +169,7 @@ def parse_json_arg(value: str | None) -> dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Manage Agent run lifecycle through the configured run store: status, cancel, retry and resume.")
+    parser = argparse.ArgumentParser(description="Manage Agent run lifecycle through the configured run store: status, cancel, retry, resume and worker leases.")
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--output-root", default="outputs/agent_runtime/api")
     parser.add_argument("--run-store", choices=["file", "sqlite", "sqlite3"], default="file")
@@ -202,6 +183,22 @@ def main() -> int:
     cancel_parser.add_argument("--run-id", required=True)
     cancel_parser.add_argument("--reason", default=None)
     cancel_parser.add_argument("--requested-by", default=None)
+
+    claim_parser = sub.add_parser("claim")
+    claim_parser.add_argument("--run-id", required=True)
+    claim_parser.add_argument("--worker-id", required=True)
+    claim_parser.add_argument("--lease-seconds", type=int, default=60)
+
+    renew_parser = sub.add_parser("renew-lease")
+    renew_parser.add_argument("--run-id", required=True)
+    renew_parser.add_argument("--worker-id", required=True)
+    renew_parser.add_argument("--lease-seconds", type=int, default=60)
+
+    release_parser = sub.add_parser("release")
+    release_parser.add_argument("--run-id", required=True)
+    release_parser.add_argument("--worker-id", required=True)
+
+    sub.add_parser("expired-leases")
 
     retry_parser = sub.add_parser("retry")
     retry_parser.add_argument("--run-id", required=True)
@@ -222,6 +219,14 @@ def main() -> int:
         result = status_run(output_root, args.run_id, store)
     elif args.command == "cancel":
         result = cancel_run(output_root, args.run_id, reason=args.reason, requested_by=args.requested_by, store=store)
+    elif args.command == "claim":
+        result = claim_run(output_root, args.run_id, args.worker_id, lease_seconds=args.lease_seconds, store=store)
+    elif args.command == "renew-lease":
+        result = renew_lease(output_root, args.run_id, args.worker_id, lease_seconds=args.lease_seconds, store=store)
+    elif args.command == "release":
+        result = release_run(output_root, args.run_id, args.worker_id, store=store)
+    elif args.command == "expired-leases":
+        result = expired_leases(output_root, store=store)
     elif args.command == "retry":
         result = retry_run(project_root=project_root, output_root=output_root, run_id=args.run_id, new_run_id=args.new_run_id, overrides=parse_json_arg(args.overrides), store=store)
     elif args.command == "resume":
