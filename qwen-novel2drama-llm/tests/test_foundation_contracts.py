@@ -68,6 +68,7 @@ class FoundationContractsTests(unittest.TestCase):
             "/v1/mcp/tools",
             "/v1/mcp/call",
             "/v1/agent/run",
+            "/v1/agent/runs",
             "/v1/agent/events",
             "/v1/agent/status",
             "/v1/agent/cancel",
@@ -78,86 +79,37 @@ class FoundationContractsTests(unittest.TestCase):
 
     def test_openapi_agent_schema_contains_provider_and_skill_loop_fields(self) -> None:
         text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
-        for field in [
-            "execute_provider:",
-            "dry_run_provider:",
-            "skill_calls:",
-            "allow_skill_provider:",
-            "allow_skill_write:",
-            "approve_skills:",
-        ]:
+        for field in ["execute_provider:", "dry_run_provider:", "skill_calls:", "allow_skill_provider:", "allow_skill_write:", "approve_skills:"]:
             self.assertIn(field, text)
 
     def test_openapi_contains_provider_stream_fields(self) -> None:
         text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
-        for field in [
-            "ProviderStreamEvent:",
-            "ProviderToolCall:",
-            "provider_stream_started",
-            "provider_stream_delta",
-            "provider_stream_tool_call_delta",
-            "provider_stream_tool_result",
-            "provider_stream_continuation_unsupported",
-            "provider_stream_continuation_failed",
-            "provider_stream_completed",
-            "provider_stream_failed",
-            "stream_provider_tool_calls:",
-            "incremental_stream_tool_execution:",
-            "same_stream_tool_result_injection:",
-            "stream_include_usage:",
-            "stream_options:",
-            "stream_chunk_chars:",
-            "force_chunked_stream:",
-            "tool_calls",
-            "arguments_json",
-            "text/event-stream",
-        ]:
+        for field in ["ProviderStreamEvent:", "ProviderToolCall:", "provider_stream_started", "provider_stream_delta", "provider_stream_tool_call_delta", "provider_stream_tool_result", "provider_stream_continuation_unsupported", "provider_stream_continuation_failed", "provider_stream_completed", "provider_stream_failed", "stream_provider_tool_calls:", "incremental_stream_tool_execution:", "same_stream_tool_result_injection:", "stream_include_usage:", "stream_options:", "stream_chunk_chars:", "force_chunked_stream:", "tool_calls", "arguments_json", "text/event-stream"]:
             self.assertIn(field, text)
 
     def test_openapi_agent_schema_contains_workspace_quota_fields(self) -> None:
         text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
-        for field in [
-            "workspace_quota_enabled:",
-            "workspace_quota_config_path:",
-            "workspace_quota_state_path:",
-        ]:
+        for field in ["workspace_quota_enabled:", "workspace_quota_config_path:", "workspace_quota_state_path:"]:
             self.assertIn(field, text)
 
     def test_openapi_agent_schema_contains_model_tool_loop_fields(self) -> None:
         text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
-        for field in [
-            "enable_model_tool_loop:",
-            "max_tool_rounds:",
-            "allow_model_tool_provider:",
-            "allow_model_tool_write:",
-            "approve_model_tools:",
-            "fail_on_model_tool_error:",
-        ]:
+        for field in ["enable_model_tool_loop:", "max_tool_rounds:", "allow_model_tool_provider:", "allow_model_tool_write:", "approve_model_tools:", "fail_on_model_tool_error:"]:
             self.assertIn(field, text)
 
     def test_openapi_agent_schema_contains_event_fields(self) -> None:
         text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
-        for field in [
-            "disable_events:",
-            "AgentEvent:",
-            "AgentEventsResponse:",
-            "event_id:",
-            "event_type:",
-            "since_event_id",
-            "text/event-stream",
-        ]:
+        for field in ["disable_events:", "AgentEvent:", "AgentEventsResponse:", "event_id:", "event_type:", "since_event_id", "text/event-stream"]:
             self.assertIn(field, text)
 
     def test_openapi_agent_schema_contains_lifecycle_fields(self) -> None:
         text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
-        for field in [
-            "AgentLifecycleRequest:",
-            "AgentLifecycleResponse:",
-            "new_run_id:",
-            "allow_completed:",
-            "cancel_requested:",
-            "source_run_id:",
-        ]:
+        for field in ["AgentLifecycleRequest:", "AgentLifecycleResponse:", "new_run_id:", "allow_completed:", "cancel_requested:", "source_run_id:"]:
+            self.assertIn(field, text)
+
+    def test_openapi_agent_schema_contains_run_listing_fields(self) -> None:
+        text = (PROJECT_ROOT / "openapi/foundation_api.openapi.yaml").read_text(encoding="utf-8")
+        for field in ["AgentRunSummary:", "AgentRunsResponse:", "parent_run_id:", "selected_model_id:", "artifact_count:", "has_provider_response:"]:
             self.assertIn(field, text)
 
     def test_openapi_contains_api_key_security_scheme(self) -> None:
