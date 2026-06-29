@@ -1,0 +1,8 @@
+{
+  "suite": "provider",
+  "cases": [
+    {"case_id": "provider_retry", "task": "provider", "request": {"actual": {"retry": true, "fallback": true}}, "expected": {"retry": true, "fallback": true}},
+    {"case_id": "provider_health", "task": "provider", "request": {"actual": {"score": "tracked", "breaker": true}}, "expected": {"score": "tracked", "breaker": true}},
+    {"case_id": "provider_usage", "task": "provider", "request": {"actual": {"usage": true, "cost": true}}, "expected": {"usage": true, "cost": true}}
+  ]
+}
