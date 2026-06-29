@@ -29,7 +29,7 @@ Txxx: <short English summary>
 ```bash
 python scripts/check_openapi_contract.py
 python -m unittest tests.test_openapi_contract_check tests.test_foundation_contracts
-python -m unittest tests.test_foundation_core_services tests.test_memory_store tests.test_rule_engine tests.test_auth_service tests.test_auth_audit_rate_limit tests.test_usage_reconciliation tests.test_model_tool_loop_usage tests.test_provider_continuation tests.test_run_store tests.test_sqlite_run_store tests.test_agent_lifecycle tests.test_worker_dispatcher tests.test_agent_events tests.test_ci_profiles tests.test_workspace_quota tests.test_quota_store tests.test_skill_registry tests.test_mcp_adapter
+python -m unittest tests.test_foundation_core_services tests.test_memory_store tests.test_rule_engine tests.test_auth_service tests.test_auth_audit_rate_limit tests.test_usage_reconciliation tests.test_model_tool_loop_usage tests.test_provider_continuation tests.test_run_store tests.test_sqlite_run_store tests.test_agent_lifecycle tests.test_worker_dispatcher tests.test_postgres_migration_history tests.test_agent_events tests.test_ci_profiles tests.test_workspace_quota tests.test_quota_store tests.test_skill_registry tests.test_mcp_adapter
 ```
 
 Optional profiles:
@@ -98,7 +98,7 @@ P1_worker_queue_dispatcher_implemented_v1 = true
 
 状态：**已完成**。
 
-完成内容：`agent/postgres_migration_history.py`、`schema_migrations` 表、migration checksum、幂等记录、checksum 冲突检测、runner 接入、测试、文档。
+完成内容：`agent/postgres_migration_history.py`、`schema_migrations` 表、migration checksum、幂等记录、checksum 冲突检测、runner 接入、`tests/test_postgres_migration_history.py`、文档。
 
 状态标记：
 
