@@ -57,7 +57,7 @@ Readiness report with component status.
 
 ### `GET /v1/health/deep`
 
-Deep readiness report with run store, quota backend, provider registry and queue summary.
+Deep readiness report with run store, quota backend, memory backend, provider registry and queue summary.
 
 ## Routing and usage
 
@@ -89,13 +89,40 @@ Output: selected model, candidates, rejected candidates, fallback chain and esti
 
 ## Memory
 
+Memory backend selection:
+
+```text
+FOUNDATION_MEMORY_BACKEND=file|sqlite|vector
+FOUNDATION_MEMORY_STORE=outputs/memory/memory.jsonl
+FOUNDATION_MEMORY_DB=outputs/memory/memory.sqlite
+```
+
 ### `POST /v1/memory/write`
 
-Writes a scoped memory item.
+Writes a scoped memory item. Output includes the stored item and `memory_store` metadata.
 
 ### `POST /v1/memory/search`
 
-Searches scoped memory and returns memory items.
+Searches scoped memory and returns memory items. Output includes `items` and `memory_store` metadata.
+
+Stable item fields:
+
+```json
+{
+  "id": "...",
+  "scope": "project",
+  "owner_id": null,
+  "project_id": "...",
+  "content": "...",
+  "tags": [],
+  "sensitivity": "internal",
+  "importance": 0.5,
+  "score": 1.0,
+  "metadata": {}
+}
+```
+
+Vector backend may add `lexical_score` and `vector_score`.
 
 ## Skills
 
