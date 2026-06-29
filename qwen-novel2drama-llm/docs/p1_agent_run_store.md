@@ -12,6 +12,8 @@ Implemented files:
 - `agent/lifecycle.py`
 - `inference/api_server.py`
 - `migrations/postgres_run_store.sql`
+- `scripts/apply_postgres_run_store_migration.py`
+- `configs/run_store/postgres.example.env`
 - `requirements/postgres-run-store.txt`
 - `tests/test_run_store.py`
 - `tests/test_sqlite_run_store.py`
@@ -32,7 +34,7 @@ Factories:
 ```python
 file_run_store(output_root)
 sqlite_run_store(db_path)
-postgres_run_store(dsn=None, output_root=None, connect=False, auto_init=False)
+postgres_run_store(dsn=None, output_root=None, connect=False, auto_init=False, connection_profile=None)
 build_run_store(kind, output_root, sqlite_path=None, postgres_dsn=None)
 ```
 
@@ -108,7 +110,7 @@ SQLite is local-node persistence, not a distributed store.
 
 ## Postgres store
 
-`PostgresRunStore` now implements real persistence for the same contract using optional `psycopg` dependency.
+`PostgresRunStore` implements persistence for the same contract using the optional Postgres dependency profile.
 
 Dependency profile:
 
@@ -116,27 +118,24 @@ Dependency profile:
 python -m pip install -r requirements/postgres-run-store.txt
 ```
 
-Schema migration:
+Schema migration file:
 
 ```text
 migrations/postgres_run_store.sql
 ```
 
-The schema defines:
+Migration runner:
 
-```text
-runs
-run_requests
-run_reports
-run_events
-cancel_requests
-run_artifacts
-run_leases
+```bash
+python scripts/apply_postgres_run_store_migration.py --dry-run --json
+python scripts/apply_postgres_run_store_migration.py --json
 ```
+
+The runner never prints the DSN value. It only reports whether a DSN is configured.
 
 Runtime methods implemented:
 
-- `init_db()`
+- `init_db(sql_path=...)`
 - `save_request()` / `load_request()`
 - `save_report()` / `load_report()`
 - `append_event()` / `load_events()` / `event_summary()`
@@ -148,7 +147,26 @@ Runtime methods implemented:
 
 Postgres worker lease operations use `SELECT ... FOR UPDATE` around the lease row so one transaction decides claim/renew/release for that run.
 
-`PostgresRunStore` is optional. Core CI imports the module without installing psycopg; real DB behavior is tested only through the optional profile and DSN-gated test.
+## Postgres connection profile
+
+Example config file:
+
+```text
+configs/run_store/postgres.example.env
+```
+
+Connection pool env:
+
+```text
+FOUNDATION_AGENT_RUN_POSTGRES_POOL_ENABLED=false
+FOUNDATION_AGENT_RUN_POSTGRES_POOL_MIN=1
+FOUNDATION_AGENT_RUN_POSTGRES_POOL_MAX=5
+FOUNDATION_AGENT_RUN_POSTGRES_POOL_TIMEOUT=30
+```
+
+When pool mode is enabled, `PostgresRunStore` lazily creates a `psycopg_pool.ConnectionPool`. Call `close()` during shutdown to close the pool.
+
+Core CI imports the module without installing Postgres dependencies and does not connect to a database. Real DB behavior is DSN-gated in the optional Postgres profile.
 
 ## CI profiles
 
@@ -207,8 +225,8 @@ File mode writes `worker_lease.json`; SQLite writes `run_leases`; Postgres write
 
 ## Current limitations
 
-- Postgres persistence v1 is implemented, but migrations are SQL-file based; there is no migration runner yet.
-- No connection pool management beyond psycopg connection creation.
+- Postgres migration runner exists, but schema version tracking is not implemented yet.
+- Connection pool config exists, but there is no full production deployment profile or health-check endpoint yet.
 - Real Postgres tests require external DSN configuration and are not part of default core CI.
 - Worker leases are still cooperative and not a full task queue.
 - Runtime still writes compatibility file artifacts.
@@ -217,7 +235,7 @@ File mode writes `worker_lease.json`; SQLite writes `run_leases`; Postgres write
 
 ## Next steps
 
-- Add a migration runner.
-- Add connection pooling and production deployment profile.
+- Add schema version tracking and migration history table.
+- Add production deployment profile and pool health checks.
 - Add full worker queue/dispatcher semantics on top of leases.
 - Add richer query indexes and retention policies.
