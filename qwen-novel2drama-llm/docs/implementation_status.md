@@ -24,6 +24,7 @@
 - `services/vector_memory_store.py`：deterministic vector memory backend 已完成。
 - `services/memory_store.py`：`FOUNDATION_MEMORY_BACKEND=file|sqlite|vector` backend selection 已完成。
 - `inference/api_server.py`：Memory API 已接入 selectable backend，readiness 暴露 `memory_backend`。
+- `services/memory_quality.py`：Memory duplicate/conflict/merge/compression 治理 helpers 已完成。
 - `docs/MEMORY_ROADMAP.md`：Memory 后端状态、API 兼容和后续路线已更新。
 
 ### P2 Foundation
@@ -32,10 +33,15 @@
 - `providers/resilience.py`：retry、fallback、circuit breaker、provider health scoring。
 - `services/multimodal_router.py`：多模态 routing contract。
 - `mcp/sdk_compat.py`：MCP SDK compatibility layer。
-- `evals/eval_runner.py`：eval runner 和 golden cases。
+- `evals/eval_runner.py`：eval runner。
+- `evals/quality_gate.py` 与 `evals/golden/*.json`：expanded golden dataset 和质量门禁已完成。
 - `services/tracing.py`：trace/span lifecycle。
 - `services/audit_query.py`：audit query/export/retention。
 - `scripts/deploy_profile.py`：deploy profile validator。
+- `scripts/cloud_deploy_profile.py`、`deploy/terraform/main.tf`、`deploy/k8s/README.md`、`deploy/security/security_profile.yaml`、`deploy/observability/slo.yaml`：云部署、Terraform、安全、WAF/CDN/SLO profile 已完成仓库级模板与校验。
+- `services/managed_secret_resolver.py`：AWS/GCP/Azure/Vault/env managed secret resolver contract 已完成。
+- `external_queue/*`：外部队列抽象、retry/dead-letter、跨区域调度策略已完成。
+- `billing/*`：provider usage record loading、reconciliation、workspace export 已完成。
 
 ### P3 AI 短剧/漫剧专项能力
 
@@ -50,6 +56,7 @@
 - `providers/media_generation.py`：图片/视频生成任务提交、任务轮询、资产记录写入的通用 HTTP provider client。
 - `drama/media_assets.py`：角色定妆图任务和分镜视频任务提交编排。
 - `drama/generation_api.py`：图片/视频生成 API handlers。
+- `media/provider_gateway.py`、`media/repository.py`、`media/review_workflow.py`：平台媒体 gateway profile、资产仓库、人工审核流已完成。
 - `drama/skills.py` 与 `configs/skills/foundation_skills.json`：短剧核心 skills 已 active。
 
 ## 已完成标记
@@ -68,7 +75,14 @@ P1_sqlite_memory_backend_implemented_v1 = true
 P1_vector_memory_backend_implemented_v1 = true
 P1_memory_backend_selection_implemented_v1 = true
 P1_memory_api_backend_selection_implemented_v1 = true
+P1_memory_quality_governance_implemented_v1 = true
 P2_foundation_capabilities_implemented_v1 = true
+P2_expanded_golden_dataset_quality_gate_implemented_v1 = true
+P2_cloud_deploy_profile_implemented_v1 = true
+P2_managed_secret_waf_cdn_slo_profile_implemented_v1 = true
+P2_external_queue_cross_region_dispatch_contract_implemented_v1 = true
+P2_billing_usage_record_reconciliation_export_implemented_v1 = true
+P3_media_gateway_asset_review_workflow_implemented_v1 = true
 P3_novel_parsing_implemented_v1 = true
 P3_novel_to_drama_outline_implemented_v1 = true
 P3_character_system_implemented_v1 = true
@@ -86,23 +100,23 @@ implementation_completed = false
 
 ## 当前最重要的未完成项
 
-1. 大规模 golden dataset 与质量门禁。
-2. Kubernetes / Terraform。
-3. AWS/GCP/Azure/Vault managed secret manager。
-4. 真实证书、域名、WAF、CDN。
-5. Prometheus/Grafana/SLO 告警部署。
-6. 真实备份策略和 RPO/RTO 演练。
-7. 外部 MQ / 跨区域调度。
-8. 真实 billing invoice import/export integrations。
-9. 平台专属媒体生成网关、资产托管、审核流、人工复核工作台。
-10. Memory duplicate/contradiction/merge/compression 高级治理。
+1. 真实云账号中的 Kubernetes cluster / Terraform apply 尚未执行。
+2. 真实域名、证书、WAF、CDN 尚未绑定到云平台。
+3. 真实 AWS/GCP/Azure/Vault SDK 调用需要具体云环境和权限。
+4. 真实外部 MQ adapter 需要选择 Redis/RabbitMQ/SQS/PubSub 之一并提供连接信息。
+5. 真实 provider 账单文件需要接入具体平台导出格式。
+6. 平台专属媒体网关需要具体平台 endpoint、鉴权、额度、callback 和资产存储桶。
+7. 外部向量数据库和真实 embedding provider 尚未接入。
 
 ## 禁止误判
 
-- SQLite/vector memory backend 完成，不等于外部向量数据库、真实 embedding provider 和高级记忆治理已经完成。
-- 直接图片/视频生成 adapter 完成，不等于具体第三方平台账号、端点、额度和平台侧参数已经配置。
-- P3 pipeline 完成，不等于已经生成最终成片。
-- Media generation job client 完成，不等于资产 CDN、版权检查、审核流和人工复核系统完成。
+- 仓库级 cloud profile 完成，不等于已经对某个云账号执行 `terraform apply`。
+- Managed secret contract 完成，不等于真实云 secret manager 已经授权可读。
+- WAF/CDN/SLO profile 完成，不等于真实域名和证书已经绑定。
+- External queue contract 完成，不等于 Redis/RabbitMQ/SQS/PubSub 已经部署。
+- Billing usage reconciliation 完成，不等于已经接入所有第三方平台真实账单格式。
+- Media gateway/repository/review workflow 完成，不等于具体第三方视频平台的 endpoint 和回调已开通。
+- SQLite/vector memory backend 完成，不等于外部向量数据库和真实 embedding provider 已经完成。
 - Foundation 边界文档完成，不等于 ForgePilot 已经开发完成。
 - Repository-level hardening 完成，不等于已经部署到某个云平台生产环境。
 - 训练 runbook 不等于模型已经训练完成。
