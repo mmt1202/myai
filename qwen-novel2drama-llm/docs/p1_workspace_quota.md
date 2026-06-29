@@ -242,3 +242,11 @@ python agent/runtime.py \
 - Add Postgres/distributed quota backend.
 - Add API middleware-level quota checks for selected scopes.
 - Add workspace budget dashboards and rollups.
+
+## Postgres quota backend v1
+
+T013 adds an optional Postgres-backed `QuotaStore` implementation for environments that need quota state outside local files or SQLite. Select it with `FOUNDATION_QUOTA_BACKEND=postgres` (aliases: `postgresql`, `pg`) and provide `FOUNDATION_QUOTA_POSTGRES_DSN`. The schema lives in `migrations/postgres_quota_store.sql` and persists three contract surfaces: rate-limit buckets, workspace usage counters, and workspace quota events.
+
+The dependency profile is intentionally optional (`requirements/postgres-quota.txt`) so core CI does not connect to or require a real Postgres service. Real database tests are DSN-gated by `FOUNDATION_QUOTA_POSTGRES_DSN` and skip when the DSN is absent.
+
+Boundary: this backend is persistence v1 for quota decisions. It is not a complete billing system, not a globally coordinated distributed limiter with cross-region guarantees, and not production-grade billing/revenue accounting.

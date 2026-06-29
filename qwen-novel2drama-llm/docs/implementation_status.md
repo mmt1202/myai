@@ -114,3 +114,9 @@ implementation_completed = false
 - DB-backed Agent events 完成，不等于分布式事件总线、WebSocket 或生产级任务队列完成。
 - 本地 provider adapter 完成，不等于所有 provider 已接入。
 - 训练 runbook 不等于模型已经训练完成。
+
+### T013 Postgres quota backend v1
+
+Completed: `PostgresQuotaStore` persists rate-limit buckets, workspace usage, and quota events in Postgres via `FOUNDATION_QUOTA_BACKEND=postgres` and `FOUNDATION_QUOTA_POSTGRES_DSN`. Core file and SQLite quota stores remain supported; Postgres integration tests are DSN-gated and skipped by default when no real database is configured.
+
+Explicit non-goals: this milestone does not deliver a full billing system, globally distributed rate limiting semantics, or production-grade billing controls.
