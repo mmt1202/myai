@@ -21,56 +21,33 @@ Implemented files:
 - `tests/test_provider_continuation.py`
 - `tests/test_provider_smoke_config.py`
 
-## Base provider contract
-
-`providers/base.py` defines the provider error, response envelope, usage normalization, stream event and continuation capability contracts.
-
-## Provider stream events
-
-Supported event types:
-
-- `provider_stream_started`
-- `provider_stream_delta`
-- `provider_stream_tool_call_delta`
-- `provider_stream_tool_result`
-- `provider_stream_continuation_started`
-- `provider_stream_continuation_delta`
-- `provider_stream_continuation_completed`
-- `provider_stream_continuation_unsupported`
-- `provider_stream_continuation_failed`
-- `provider_stream_completed`
-- `provider_stream_failed`
-
 ## Provider-native continuation adapter
 
-`providers/realtime_base.py` defines the provider-native continuation adapter boundary:
+`providers/realtime_base.py` defines the provider-native continuation adapter boundary and concrete adapters:
 
 - `ProviderNativeContinuationAdapter`
 - `TestDoubleContinuationAdapter`
+- `OpenAIResponsesContinuationAdapter`
+- `OpenAIRealtimeSessionContinuationAdapter`
 - `adapter_for_protocol(protocol)`
 
-The test-double protocols are:
+Protocols:
 
 ```text
 provider_native_test
 openai_realtime_test
 openai_responses_test
-```
-
-These protocols do not call a real provider. They prove that provider-native continuation chunks can pass through the provider factory and Agent stream bridge without falling back to a next provider request.
-
-Reserved real protocol names:
-
-```text
-openai_realtime
 openai_responses
+openai_realtime
 ```
 
-They require dedicated provider-specific sessions before being marked operational.
+`openai_responses` posts tool results back through the Responses API by appending a `function_call_output` item to the input list and calling `/responses`.
+
+`openai_realtime` requires an existing realtime session object in `stream_context["realtime_session"]`. The adapter sends a `conversation.item.create` function-call-output event and then a `response.create` event before reading response events from the provided session.
 
 ## OpenAI-compatible provider
 
-`providers/openai_compatible.py` supports OpenAI-compatible chat completions.
+`providers/openai_compatible.py` supports OpenAI-compatible chat completions and routes configured provider-native continuation protocols to `providers/realtime_base.py`.
 
 It can:
 
@@ -85,7 +62,7 @@ It can:
 - parse provider SSE `data: {...}` lines
 - emit streamed text and streamed tool-call chunks
 - reconstruct streamed tool calls by `index`
-- route explicitly configured provider-native test continuation protocols to `providers/realtime_base.py`
+- continue via `openai_responses` or a caller-supplied `openai_realtime` session when configured
 
 ## Gated provider smoke runner
 
@@ -129,12 +106,6 @@ python scripts/ci_profiles.py --profile provider-smoke
 python -m unittest tests.test_provider_smoke_config
 ```
 
-Manual workflow:
-
-```text
-.github/workflows/foundation-provider-smoke.yml
-```
-
 ## Local text provider
 
 `providers/local_text.py` adapts the existing local `inference/model_utils.py` runtime to the provider contract.
@@ -143,7 +114,7 @@ It supports local dry-run, local model resolution, cache/concurrency controls, l
 
 ## Current limitations
 
-- Provider-native continuation v1 includes a test-double adapter and explicit OpenAI-compatible routing for configured test protocols.
-- Real OpenAI Realtime/Responses same-session continuation is still not implemented.
+- `openai_responses` is request-based continuation, not a WebSocket session.
+- `openai_realtime` adapter requires the caller to provide an already-open realtime session object; this project still does not own browser/WebRTC connection setup.
 - Provider smoke runner is gated and optional; it is not part of default core CI.
-- Provider-specific realtime session management still needs dedicated adapters.
+- Provider-specific production session lifecycle management still needs deployment hardening.
