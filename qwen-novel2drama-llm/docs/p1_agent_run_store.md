@@ -1,15 +1,18 @@
 # P1 Agent Run Store
 
-This layer introduces a replaceable run store contract for Agent run state.
+This layer introduces a replaceable run store contract for Agent run state, event reads, run listing and lifecycle state.
 
 Implemented files:
 
 - `agent/run_store.py`
 - `agent/sqlite_run_store.py`
+- `agent/events.py`
+- `agent/runtime.py`
 - `agent/lifecycle.py`
 - `inference/api_server.py`
 - `tests/test_run_store.py`
 - `tests/test_sqlite_run_store.py`
+- `tests/test_agent_events.py`
 - `tests/test_agent_lifecycle.py`
 - `tests/test_api_server_foundation.py`
 
@@ -25,12 +28,6 @@ Before this layer, Agent lifecycle code read and wrote these files directly:
 The run store abstraction makes those operations explicit so a future database-backed store can replace the file-backed implementation without rewriting lifecycle APIs.
 
 ## Contract
-
-Base interface:
-
-```text
-RunStore
-```
 
 Implemented stores:
 
@@ -80,9 +77,11 @@ Core operations:
 - `status(run_id)`
 - `metadata()`
 
+SQLite also implements `append_event(run_id, event)`. Runtime uses this for live DB-backed event indexing while preserving JSONL event files.
+
 ## Run listing/query
 
-Both stores now expose:
+Both stores expose:
 
 ```python
 list_runs(
@@ -98,42 +97,25 @@ list_runs(
 )
 ```
 
-The return shape is:
-
-```json
-{
-  "runs": [
-    {
-      "run_id": "demo",
-      "status": "completed",
-      "error": null,
-      "created_at": "...",
-      "updated_at": "...",
-      "completed_at": "...",
-      "task": "...",
-      "owner_id": "...",
-      "project_id": "...",
-      "workspace_id": "...",
-      "parent_run_id": null,
-      "retry_of": null,
-      "resume_of": null,
-      "route_mode": "balanced",
-      "selected_model_id": "local.qwen2_5_1_5b_instruct",
-      "artifact_count": 4,
-      "has_provider_response": false,
-      "run_store": {"type": "file"}
-    }
-  ],
-  "total": 1,
-  "limit": 50,
-  "offset": 0,
-  "order": "desc",
-  "filters": {},
-  "run_store": {"type": "file"}
-}
-```
-
 `query` is a lightweight substring search over run id, task, status, error, owner/project/workspace id and selected model id. This is not a full-text search engine.
+
+## Event storage and reads
+
+File store behavior:
+
+- `AgentEventWriter` writes `events.jsonl` under the run directory.
+- `FileRunStore.load_events(run_id)` reads that JSONL file.
+- `GET /v1/agent/events` reads through the selected run store, so file mode still returns JSONL events.
+
+SQLite store behavior:
+
+- `AgentEventWriter(..., store=sqlite_store)` still writes compatibility `events.jsonl`.
+- The same event is also appended to SQLite `run_events` as it is emitted.
+- `SQLiteRunStore.load_events(run_id)` reads from the `run_events` table.
+- `GET /v1/agent/events` reads SQLite events through the selected store.
+- `GET /v1/agent/events?stream=true` polls the selected store, so SQLite mode can stream DB-backed events.
+
+This gives DB-backed event reads without deleting the existing file artifacts.
 
 ## File-backed implementation
 
@@ -158,12 +140,6 @@ agent_run_created.json   -> initial created run snapshot
 ## SQLite-backed implementation
 
 `SQLiteRunStore` is a local database-backed implementation that uses Python standard-library `sqlite3` only. It is intended for single-node/local persistence and testable lifecycle state, not for distributed leases or Postgres-scale coordination.
-
-Factory:
-
-```python
-sqlite_run_store(db_path)
-```
 
 Required tables are created automatically when the store is constructed:
 
@@ -199,30 +175,13 @@ Core operations supported in v1:
 
 Missing runs or missing request/report records raise `RunNotFoundError` so callers can treat SQLite and file-backed stores consistently.
 
-## Lifecycle integration
-
-`agent/lifecycle.py` routes through a selected run store while preserving its public function signatures:
-
-- `status_run(output_root, run_id, store=None)`
-- `cancel_run(output_root, run_id, ..., store=None)`
-- `retry_run(project_root=..., output_root=..., run_id=..., ..., store=None)`
-- `resume_run(project_root=..., output_root=..., run_id=..., ..., store=None)`
-
-The optional `store` parameter is the compatibility seam for future database-backed implementations.
-
-CLI selection:
-
-```bash
-python agent/lifecycle.py --run-store file --output-root outputs/agent_runtime/api status --run-id demo
-python agent/lifecycle.py --run-store sqlite --sqlite-path outputs/agent_runtime/runs.sqlite status --run-id demo
-```
-
 ## API integration
 
 The API endpoints call lifecycle/run store functions:
 
 - `POST /v1/agent/run`
 - `GET /v1/agent/runs`
+- `GET /v1/agent/events`
 - `GET /v1/agent/status`
 - `POST /v1/agent/cancel`
 - `POST /v1/agent/retry`
@@ -243,6 +202,15 @@ Default behavior remains file-backed.
 GET /v1/agent/runs?status=completed&workspace_id=w1&query=demo&limit=50&offset=0&order=desc
 ```
 
+`GET /v1/agent/events` now reads from the selected run store:
+
+```text
+GET /v1/agent/events?run_id=demo
+GET /v1/agent/events?run_id=demo&stream=true
+```
+
+The JSON response includes `events_source`, `run_store` and `events_path` for debugging compatibility mode.
+
 ## Safety
 
 `safe_run_id()` rejects:
@@ -257,16 +225,16 @@ This keeps file paths and store keys from path traversal.
 ## Current limitations
 
 - Implemented stores are `FileRunStore` and local `SQLiteRunStore`.
-- API/lifecycle can select SQLite, but runtime artifact files still remain the compatibility output.
+- Runtime still writes compatibility file artifacts.
 - File-backed listing scans local run directories and is not intended for large-scale production search.
 - SQLite listing uses local SQLite/Python filtering and is not a distributed query service.
-- API Agent events still read JSONL files; full DB-backed event streaming is a later task.
+- SQLite DB-backed events are local-node events, not a distributed event bus.
 - No Postgres implementation yet; SQLite is local-only and not distributed.
 - No transaction, lock, lease or distributed concurrency control yet.
+- SSE is still polling-based, not WebSocket or push-based infrastructure.
 
 ## Next steps
 
-- Add DB-backed Agent events and lifecycle status reads.
 - Add locking/lease semantics for distributed workers.
 - Add Postgres run store implementation.
 - Add richer search indexes if run volume grows.
