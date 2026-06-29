@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from services.quota_store import QuotaStore, quota_store_from_env
+
 USAGE_KEYS = ["requests", "input_tokens", "output_tokens", "reasoning_tokens", "total_tokens", "cost"]
 
 
@@ -142,17 +144,7 @@ def check_period_limits(period: str, limits: dict[str, Any], current: dict[str, 
             continue
         projected_value = number(projected.get(metric))
         if projected_value > max_value:
-            violations.append(
-                {
-                    "period": period,
-                    "metric": metric,
-                    "limit": max_value,
-                    "current": number(current.get(metric)),
-                    "increment": number(increment.get(metric)),
-                    "projected": projected_value,
-                    "excess": projected_value - max_value,
-                }
-            )
+            violations.append({"period": period, "metric": metric, "limit": max_value, "current": number(current.get(metric)), "increment": number(increment.get(metric)), "projected": projected_value, "excess": projected_value - max_value})
     return {"period": period, "current": current, "increment": increment, "projected": projected, "violations": violations}
 
 
@@ -178,16 +170,7 @@ def check_workspace_quota(
             report = check_period_limits(period, limits, current, increment)
             period_reports.append(report)
             violations.extend(report["violations"])
-    return {
-        "workspace_id": resolved_workspace,
-        "enabled": enabled,
-        "allowed": enabled is False or not violations,
-        "decision": "allowed" if (enabled is False or not violations) else "denied",
-        "increment": increment,
-        "periods": period_reports,
-        "violations": violations,
-        "limits": limits,
-    }
+    return {"workspace_id": resolved_workspace, "enabled": enabled, "allowed": enabled is False or not violations, "decision": "allowed" if (enabled is False or not violations) else "denied", "increment": increment, "periods": period_reports, "violations": violations, "limits": limits}
 
 
 def add_usage(existing: dict[str, Any], increment: dict[str, Any]) -> dict[str, float]:
@@ -216,15 +199,19 @@ def record_workspace_usage(
         key = period_key(period, current_time)
         ws_state[key] = add_usage(ws_state.get(key) or {}, increment)
         updated_periods[key] = ws_state[key]
-    event = {
-        "created_at": current_time.isoformat(),
-        "workspace_id": resolved_workspace,
-        "increment": increment,
-        "metadata": metadata or {},
-    }
+    event = {"created_at": current_time.isoformat(), "workspace_id": resolved_workspace, "increment": increment, "metadata": metadata or {}}
     state.setdefault("events", []).append(event)
     state["events"] = state["events"][-1000:]
     return {"workspace_id": resolved_workspace, "increment": increment, "updated_periods": updated_periods, "event": event}
+
+
+def store_state_for_check(store: QuotaStore, workspace_id: str, at: datetime | None = None) -> dict[str, Any]:
+    current_time = at or now_utc()
+    workspace = {}
+    for period in ["daily", "monthly"]:
+        key = period_key(period, current_time)
+        workspace[key] = store.workspace_current_usage(workspace_id=workspace_id, period_key=key, usage_keys=USAGE_KEYS)
+    return {"workspaces": {workspace_id: workspace}, "events": []}
 
 
 def check_workspace_quota_from_paths(
@@ -235,10 +222,15 @@ def check_workspace_quota_from_paths(
     usage: dict[str, Any] | None,
     cost: dict[str, Any] | None = None,
     at: datetime | None = None,
+    store: QuotaStore | None = None,
 ) -> dict[str, Any]:
     config = load_json(config_path, {"default": {"enabled": False}})
-    state = load_json(state_path, {"workspaces": {}, "events": []})
-    return check_workspace_quota(config=config, state=state, workspace_id=workspace_id, usage=usage, cost=cost, at=at)
+    resolved_workspace = workspace_id or "default"
+    selected_store = store or quota_store_from_env(rate_limit_state_path=state_path.with_name("rate_limit_state.json"), workspace_quota_state_path=state_path)
+    state = store_state_for_check(selected_store, resolved_workspace, at)
+    report = check_workspace_quota(config=config, state=state, workspace_id=resolved_workspace, usage=usage, cost=cost, at=at)
+    report["quota_store"] = selected_store.metadata() if hasattr(selected_store, "metadata") else {}
+    return report
 
 
 def record_workspace_usage_to_path(
@@ -249,11 +241,16 @@ def record_workspace_usage_to_path(
     cost: dict[str, Any] | None = None,
     at: datetime | None = None,
     metadata: dict[str, Any] | None = None,
+    store: QuotaStore | None = None,
 ) -> dict[str, Any]:
-    state = load_json(state_path, {"workspaces": {}, "events": []})
-    result = record_workspace_usage(state=state, workspace_id=workspace_id, usage=usage, cost=cost, at=at, metadata=metadata)
-    save_json(state_path, state)
-    return result
+    selected_store = store or quota_store_from_env(rate_limit_state_path=state_path.with_name("rate_limit_state.json"), workspace_quota_state_path=state_path)
+    resolved_workspace = workspace_id or "default"
+    current_time = at or now_utc()
+    increment = usage_increment(usage, cost)
+    period_increments = {period_key(period, current_time): increment for period in ["daily", "monthly"]}
+    event = {"created_at": current_time.isoformat(), "workspace_id": resolved_workspace, "increment": increment, "metadata": metadata or {}}
+    result = selected_store.record_workspace_usage(workspace_id=resolved_workspace, period_increments=period_increments, event=event, usage_keys=USAGE_KEYS)
+    return {"workspace_id": resolved_workspace, "increment": increment, "updated_periods": result.get("updated_periods") or {}, "event": event, "quota_store": selected_store.metadata() if hasattr(selected_store, "metadata") else {}}
 
 
 def main() -> int:
