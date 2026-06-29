@@ -14,6 +14,8 @@ REPORT_FILENAME = "agent_run_report.json"
 EVENTS_FILENAME = "events.jsonl"
 RUN_CREATED_FILENAME = "agent_run_created.json"
 DEFAULT_SQLITE_RUN_DB = "runs.sqlite"
+RUN_LIST_DEFAULT_LIMIT = 50
+RUN_LIST_MAX_LIMIT = 200
 
 
 class RunStoreError(RuntimeError):
@@ -24,6 +26,88 @@ class RunNotFoundError(FileNotFoundError):
     def __init__(self, run_id: str) -> None:
         super().__init__(run_id)
         self.run_id = run_id
+
+
+def normalize_list_limit(limit: int | None) -> int:
+    if limit is None:
+        return RUN_LIST_DEFAULT_LIMIT
+    return max(1, min(int(limit), RUN_LIST_MAX_LIMIT))
+
+
+def normalize_list_offset(offset: int | None) -> int:
+    if offset is None:
+        return 0
+    return max(0, int(offset))
+
+
+def normalize_sort_order(order: str | None) -> str:
+    value = str(order or "desc").strip().lower()
+    return "asc" if value == "asc" else "desc"
+
+
+def run_summary_from_report(run_id: str, report: dict[str, Any], *, run_store: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "status": report.get("status"),
+        "error": report.get("error"),
+        "created_at": report.get("created_at"),
+        "updated_at": report.get("updated_at"),
+        "completed_at": report.get("completed_at"),
+        "task": report.get("task"),
+        "owner_id": report.get("owner_id"),
+        "project_id": report.get("project_id"),
+        "workspace_id": report.get("workspace_id"),
+        "parent_run_id": report.get("parent_run_id"),
+        "retry_of": report.get("retry_of"),
+        "resume_of": report.get("resume_of"),
+        "route_mode": report.get("route_mode"),
+        "selected_model_id": (report.get("route_decision") or {}).get("selected_model_id"),
+        "artifact_count": len(report.get("artifacts") or {}),
+        "has_provider_response": bool(report.get("provider_response")),
+        "run_store": run_store or {},
+    }
+
+
+def run_summary_matches_filters(
+    summary: dict[str, Any],
+    *,
+    status: str | None = None,
+    owner_id: str | None = None,
+    project_id: str | None = None,
+    workspace_id: str | None = None,
+    parent_run_id: str | None = None,
+    query: str | None = None,
+) -> bool:
+    filters = {
+        "status": status,
+        "owner_id": owner_id,
+        "project_id": project_id,
+        "workspace_id": workspace_id,
+        "parent_run_id": parent_run_id,
+    }
+    for key, value in filters.items():
+        if value is not None and str(summary.get(key) or "") != str(value):
+            return False
+    if query:
+        needle = query.lower()
+        haystack = " ".join(str(summary.get(key) or "") for key in ["run_id", "task", "status", "error", "owner_id", "project_id", "workspace_id", "selected_model_id"]).lower()
+        return needle in haystack
+    return True
+
+
+def paginate_run_summaries(runs: list[dict[str, Any]], *, limit: int | None = None, offset: int | None = None, order: str | None = None) -> dict[str, Any]:
+    normalized_limit = normalize_list_limit(limit)
+    normalized_offset = normalize_list_offset(offset)
+    normalized_order = normalize_sort_order(order)
+    reverse = normalized_order == "desc"
+    sorted_runs = sorted(runs, key=lambda item: item.get("updated_at") or item.get("created_at") or "", reverse=reverse)
+    return {
+        "runs": sorted_runs[normalized_offset : normalized_offset + normalized_limit],
+        "total": len(sorted_runs),
+        "limit": normalized_limit,
+        "offset": normalized_offset,
+        "order": normalized_order,
+    }
 
 
 class RunStore(ABC):
@@ -77,6 +161,22 @@ class RunStore(ABC):
 
     @abstractmethod
     def save_artifact(self, run_id: str, name: str, artifact: dict[str, Any], *, path: str | None = None) -> Path:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_runs(
+        self,
+        *,
+        status: str | None = None,
+        owner_id: str | None = None,
+        project_id: str | None = None,
+        workspace_id: str | None = None,
+        parent_run_id: str | None = None,
+        query: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        order: str | None = None,
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
@@ -158,6 +258,35 @@ class FileRunStore(RunStore):
         if path:
             return self.artifact_path(run_id, name)
         return self.save_json(self.artifact_path(run_id, name), artifact)
+
+    def list_runs(
+        self,
+        *,
+        status: str | None = None,
+        owner_id: str | None = None,
+        project_id: str | None = None,
+        workspace_id: str | None = None,
+        parent_run_id: str | None = None,
+        query: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        order: str | None = None,
+    ) -> dict[str, Any]:
+        runs: list[dict[str, Any]] = []
+        if self.output_root.exists():
+            for child in self.output_root.iterdir():
+                if not child.is_dir():
+                    continue
+                try:
+                    run_id = self.safe_run_id(child.name)
+                    report = self.load_report(run_id)
+                except Exception:  # noqa: BLE001
+                    continue
+                summary = run_summary_from_report(run_id, report, run_store=self.metadata())
+                if run_summary_matches_filters(summary, status=status, owner_id=owner_id, project_id=project_id, workspace_id=workspace_id, parent_run_id=parent_run_id, query=query):
+                    runs.append(summary)
+        page = paginate_run_summaries(runs, limit=limit, offset=offset, order=order)
+        return {**page, "run_store": self.metadata(), "filters": {"status": status, "owner_id": owner_id, "project_id": project_id, "workspace_id": workspace_id, "parent_run_id": parent_run_id, "query": query}}
 
     def status(self, run_id: str) -> dict[str, Any]:
         safe_id = self.safe_run_id(run_id)
