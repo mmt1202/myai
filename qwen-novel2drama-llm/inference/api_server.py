@@ -24,7 +24,7 @@ from model_version_registry import resolve_model_paths
 from pydantic import BaseModel, Field
 
 from agent.events import read_agent_events, summarize_agent_events
-from agent.lifecycle import cancel_run, index_run_in_store, resume_run, retry_run, status_run
+from agent.lifecycle import cancel_run, resume_run, retry_run, status_run
 from agent.run_store import RunStore, build_run_store, default_sqlite_path
 from agent.runtime import run_agent_once
 from inference.model_router import route_model
@@ -181,21 +181,9 @@ def stream_provider_sse(chunks: Iterator[dict[str, Any]]) -> Iterator[str]:
         for chunk in chunks:
             yield provider_sse_event(chunk)
     except ProviderError as exc:
-        yield provider_sse_event(
-            provider_stream_event(
-                "provider_stream_failed",
-                error=exc.to_error(),
-                done=True,
-            )
-        )
+        yield provider_sse_event(provider_stream_event("provider_stream_failed", error=exc.to_error(), done=True))
     except Exception as exc:  # noqa: BLE001
-        yield provider_sse_event(
-            provider_stream_event(
-                "provider_stream_failed",
-                error={"code": "provider_error", "message": str(exc), "retryable": False, "details": {}},
-                done=True,
-            )
-        )
+        yield provider_sse_event(provider_stream_event("provider_stream_failed", error={"code": "provider_error", "message": str(exc), "retryable": False, "details": {}}, done=True))
 
 
 async def stream_agent_events(run_id: str, *, since_event_id: str | None = None, poll_interval: float = 1.0, max_seconds: int = 60, limit: int = 200) -> AsyncIterator[str]:
@@ -223,23 +211,7 @@ def client_host(request: Request) -> str | None:
 def emit_auth_audit(request: Request, *, decision: str, status_code: int, reason: str | None = None, auth_context: dict[str, Any] | None = None, metadata: dict[str, Any] | None = None) -> None:
     context = auth_context or getattr(request.state, "auth_context", {}) or {}
     try:
-        write_auth_event(
-            AUTH_AUDIT_PATH,
-            {
-                "event_type": "api_request",
-                "decision": decision,
-                "key_id": context.get("key_id"),
-                "owner_id": context.get("owner_id"),
-                "workspace_id": context.get("workspace_id"),
-                "required_scope": context.get("required_scope"),
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": status_code,
-                "reason": reason,
-                "client_host": client_host(request),
-                "metadata": metadata or {},
-            },
-        )
+        write_auth_event(AUTH_AUDIT_PATH, {"event_type": "api_request", "decision": decision, "key_id": context.get("key_id"), "owner_id": context.get("owner_id"), "workspace_id": context.get("workspace_id"), "required_scope": context.get("required_scope"), "method": request.method, "path": request.url.path, "status_code": status_code, "reason": reason, "client_host": client_host(request), "metadata": metadata or {}})
     except Exception:  # noqa: BLE001
         return
 
@@ -253,48 +225,22 @@ async def foundation_auth_middleware(request: Request, call_next):  # type: igno
     rate_limit_result: dict[str, Any] | None = None
     try:
         store = load_key_store(key_store_path_from_env(PROJECT_ROOT))
-        auth_context = build_auth_context(
-            method=request.method,
-            path=path,
-            api_key=request.headers.get("X-API-Key"),
-            workspace_id=request.headers.get("X-Workspace-Id"),
-            store=store,
-            auth_required=auth_required_from_env(),
-        )
+        auth_context = build_auth_context(method=request.method, path=path, api_key=request.headers.get("X-API-Key"), workspace_id=request.headers.get("X-Workspace-Id"), store=store, auth_required=auth_required_from_env())
         request.state.auth_context = auth_context
     except AuthError as exc:
         emit_auth_audit(request, decision="denied", status_code=exc.status_code, reason=exc.code, metadata=exc.to_dict())
-        content = response_envelope(
-            status="failed",
-            output=None,
-            error={"code": exc.code, "message": exc.message, "retryable": False, "details": exc.to_dict()},
-        )
+        content = response_envelope(status="failed", output=None, error={"code": exc.code, "message": exc.message, "retryable": False, "details": exc.to_dict()})
         return JSONResponse(status_code=exc.status_code, content=content)
 
     if rate_limit_enabled_from_env() and path.startswith("/v1/") and not auth_context.get("public"):
         config = load_rate_limit_json(rate_limit_config_path_from_env(PROJECT_ROOT), {"default": {"enabled": True, "limit": 120, "window_seconds": 60}})
         try:
-            rate_limit_result = check_rate_limit(
-                rate_limit_state_path_from_env(PROJECT_ROOT),
-                config,
-                key_id=str(auth_context.get("key_id") or "anonymous"),
-                required_scope=auth_context.get("required_scope"),
-                workspace_id=auth_context.get("workspace_id"),
-            )
+            rate_limit_result = check_rate_limit(rate_limit_state_path_from_env(PROJECT_ROOT), config, key_id=str(auth_context.get("key_id") or "anonymous"), required_scope=auth_context.get("required_scope"), workspace_id=auth_context.get("workspace_id"))
             request.state.rate_limit = rate_limit_result
         except RateLimitError as exc:
             emit_auth_audit(request, decision="rate_limited", status_code=429, reason="rate_limit_exceeded", auth_context=auth_context, metadata=exc.to_dict())
-            content = response_envelope(
-                status="failed",
-                output=None,
-                error={"code": "rate_limit_exceeded", "message": exc.message, "retryable": True, "details": exc.to_dict()},
-            )
-            headers = {
-                "Retry-After": str(exc.retry_after_seconds),
-                "X-RateLimit-Limit": str(exc.limit),
-                "X-RateLimit-Remaining": str(exc.remaining),
-                "X-RateLimit-Reset": str(exc.reset_at),
-            }
+            content = response_envelope(status="failed", output=None, error={"code": "rate_limit_exceeded", "message": exc.message, "retryable": True, "details": exc.to_dict()})
+            headers = {"Retry-After": str(exc.retry_after_seconds), "X-RateLimit-Limit": str(exc.limit), "X-RateLimit-Remaining": str(exc.remaining), "X-RateLimit-Reset": str(exc.reset_at)}
             return JSONResponse(status_code=429, content=content, headers=headers)
 
     response = await call_next(request)
@@ -316,13 +262,7 @@ def health() -> dict[str, str | None]:
 
 @app.get("/v1/health")
 def foundation_health() -> dict[str, Any]:
-    return {
-        "status": "ok",
-        "service": "myai-foundation",
-        "model_version": ACTIVE_MODEL_VERSION,
-        "model_path": ACTIVE_MODEL_PATH,
-        "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "agent_run_store", "provider", "provider_stream", "auth", "rate_limit", "audit"],
-    }
+    return {"status": "ok", "service": "myai-foundation", "model_version": ACTIVE_MODEL_VERSION, "model_path": ACTIVE_MODEL_PATH, "capabilities": ["router", "token", "cost", "memory", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "agent_run_store", "agent_run_query", "provider", "provider_stream", "auth", "rate_limit", "audit"]}
 
 
 @app.post("/generate", response_model=GenerateResponse)
@@ -392,14 +332,7 @@ def skills_list_api(category: str | None = None, status: str | None = None, capa
 @app.post("/v1/skills/call")
 def skills_call_api(body: dict[str, Any]) -> dict[str, Any]:
     try:
-        result = call_skill(
-            skills_registry(),
-            str(body.get("name")),
-            body.get("arguments") or {},
-            allow_provider=bool(body.get("allow_provider")),
-            allow_write=bool(body.get("allow_write")),
-            approved=bool(body.get("approved")),
-        )
+        result = call_skill(skills_registry(), str(body.get("name")), body.get("arguments") or {}, allow_provider=bool(body.get("allow_provider")), allow_write=bool(body.get("allow_write")), approved=bool(body.get("approved")))
         return ok(body, result)
     except SkillError as exc:
         return failed(body, "tool_denied", str(exc))
@@ -414,13 +347,7 @@ def mcp_tools_api(include_planned: bool = False) -> dict[str, Any]:
 
 @app.post("/v1/mcp/call")
 def mcp_call_api(body: dict[str, Any]) -> dict[str, Any]:
-    adapter = FoundationMCPAdapter(
-        PROJECT_ROOT / "configs" / "skills" / "foundation_skills.json",
-        audit_log=PROJECT_ROOT / "outputs" / "mcp" / "api_mcp_adapter.jsonl",
-        allow_provider=bool(body.get("allow_provider")),
-        allow_write=bool(body.get("allow_write")),
-        approved=bool(body.get("approved")),
-    )
+    adapter = FoundationMCPAdapter(PROJECT_ROOT / "configs" / "skills" / "foundation_skills.json", audit_log=PROJECT_ROOT / "outputs" / "mcp" / "api_mcp_adapter.jsonl", allow_provider=bool(body.get("allow_provider")), allow_write=bool(body.get("allow_write")), approved=bool(body.get("approved")))
     result = adapter.call_tool(str(body.get("name")), body.get("arguments") or {})
     return ok(body, result)
 
@@ -430,26 +357,28 @@ def agent_run_api(body: dict[str, Any]) -> dict[str, Any]:
     store = agent_run_store()
     run_id_value = agent_run_id_from_body(body)
     request_body = {**body, "run_id": body.get("run_id") or run_id_value}
-    run = run_agent_once(PROJECT_ROOT, request_body, store.run_dir(run_id_value))
-    index_run_in_store(store, run_id_value, request_body, run)
+    run = run_agent_once(PROJECT_ROOT, request_body, store.run_dir(run_id_value), store=store)
     return ok(request_body, {"run": run}, usage=run.get("usage"), cost=run.get("cost"), route=run.get("route_decision"))
+
+
+@app.get("/v1/agent/runs")
+def agent_runs_api(status: str | None = None, owner_id: str | None = None, project_id: str | None = None, workspace_id: str | None = None, parent_run_id: str | None = None, query: str | None = None, limit: int = 50, offset: int = 0, order: str = "desc") -> dict[str, Any]:
+    body = {"request_id": "agent_runs"}
+    try:
+        result = agent_run_store().list_runs(status=status, owner_id=owner_id, project_id=project_id, workspace_id=workspace_id, parent_run_id=parent_run_id, query=query, limit=limit, offset=offset, order=order)
+        return ok(body, result)
+    except ValueError as exc:
+        return failed(body, "invalid_agent_run_query", str(exc))
 
 
 @app.get("/v1/agent/events")
 def agent_events_api(run_id: str = "latest", stream: bool = False, since_event_id: str | None = None, limit: int = 200, poll_interval: float = 1.0, max_seconds: int = 60) -> dict[str, Any] | StreamingResponse:
     safe_id = safe_run_id(run_id)
     if stream:
-        return StreamingResponse(
-            stream_agent_events(safe_id, since_event_id=since_event_id, poll_interval=poll_interval, max_seconds=max_seconds, limit=limit),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        return StreamingResponse(stream_agent_events(safe_id, since_event_id=since_event_id, poll_interval=poll_interval, max_seconds=max_seconds, limit=limit), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
     events_path = agent_events_path(safe_id)
     events = limited_events(events_after(read_agent_events(events_path), since_event_id), limit)
-    return ok(
-        {"request_id": safe_id},
-        {"run_id": safe_id, "events": events, "summary": summarize_agent_events(events), "events_path": str(events_path)},
-    )
+    return ok({"request_id": safe_id}, {"run_id": safe_id, "events": events, "summary": summarize_agent_events(events), "events_path": str(events_path)})
 
 
 @app.get("/v1/agent/status")
@@ -470,13 +399,7 @@ def agent_cancel_api(body: dict[str, Any]) -> dict[str, Any]:
     run_id_value = safe_run_id(body.get("run_id") or request_id(body) or "latest")
     request_body = {**body, "request_id": request_id(body) or run_id_value, "run_id": run_id_value}
     try:
-        result = cancel_run(
-            AGENT_OUTPUT_DIR,
-            run_id_value,
-            reason=body.get("reason"),
-            requested_by=body.get("requested_by") or body.get("owner_id"),
-            store=agent_run_store(),
-        )
+        result = cancel_run(AGENT_OUTPUT_DIR, run_id_value, reason=body.get("reason"), requested_by=body.get("requested_by") or body.get("owner_id"), store=agent_run_store())
         return ok(request_body, result)
     except ValueError as exc:
         return failed(request_body, "invalid_agent_run", str(exc))
@@ -487,14 +410,7 @@ def agent_retry_api(body: dict[str, Any]) -> dict[str, Any]:
     run_id_value = safe_run_id(body.get("run_id") or "latest")
     request_body = {**body, "request_id": request_id(body) or run_id_value, "run_id": run_id_value}
     try:
-        result = retry_run(
-            project_root=PROJECT_ROOT,
-            output_root=AGENT_OUTPUT_DIR,
-            run_id=run_id_value,
-            new_run_id=body.get("new_run_id"),
-            overrides=body.get("overrides") or {},
-            store=agent_run_store(),
-        )
+        result = retry_run(project_root=PROJECT_ROOT, output_root=AGENT_OUTPUT_DIR, run_id=run_id_value, new_run_id=body.get("new_run_id"), overrides=body.get("overrides") or {}, store=agent_run_store())
         child = result.get("run") or {}
         return ok(request_body, result, usage=child.get("usage"), cost=child.get("cost"), route=child.get("route_decision"))
     except FileNotFoundError as exc:
@@ -508,15 +424,7 @@ def agent_resume_api(body: dict[str, Any]) -> dict[str, Any]:
     run_id_value = safe_run_id(body.get("run_id") or "latest")
     request_body = {**body, "request_id": request_id(body) or run_id_value, "run_id": run_id_value}
     try:
-        result = resume_run(
-            project_root=PROJECT_ROOT,
-            output_root=AGENT_OUTPUT_DIR,
-            run_id=run_id_value,
-            new_run_id=body.get("new_run_id"),
-            overrides=body.get("overrides") or {},
-            allow_completed=bool(body.get("allow_completed")),
-            store=agent_run_store(),
-        )
+        result = resume_run(project_root=PROJECT_ROOT, output_root=AGENT_OUTPUT_DIR, run_id=run_id_value, new_run_id=body.get("new_run_id"), overrides=body.get("overrides") or {}, allow_completed=bool(body.get("allow_completed")), store=agent_run_store())
         child = result.get("run") or {}
         return ok(request_body, result, usage=child.get("usage"), cost=child.get("cost"), route=child.get("route_decision"))
     except FileNotFoundError as exc:
@@ -537,11 +445,7 @@ def chat_api(body: dict[str, Any]) -> dict[str, Any] | StreamingResponse:
     provider_request = {**body, "model_id": route.get("selected_model_id")}
     if body.get("stream"):
         chunks = stream_generate_with_registry(provider_request, registry, model_id=route.get("selected_model_id"), base_url=body.get("base_url"), api_key_env=body.get("api_key_env") or "MODEL_API_KEY")
-        return StreamingResponse(
-            stream_provider_sse(chunks),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        return StreamingResponse(stream_provider_sse(chunks), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
     try:
         result = generate_with_registry(provider_request, registry, model_id=route.get("selected_model_id"), base_url=body.get("base_url"), api_key_env=body.get("api_key_env") or "MODEL_API_KEY")
     except ProviderError as exc:
