@@ -21,6 +21,44 @@ services:
       retries: 3
       start_period: 20s
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - configs/deploy/production.example.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./outputs:/app/outputs
+      - ./configs:/app/configs:ro
+    command: ["python", "agent/worker_pool.py", "--project-root", ".", "--output-root", "outputs/agent_runtime/api", "--run-store", "postgres", "--worker-count", "2", "--max-runs-per-worker", "1", "--poll-seconds", "2", "--max-idle-iterations", "30"]
+    profiles:
+      - worker
+
+  preflight:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "scripts/production_preflight.py"]
+    profiles:
+      - preflight
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./configs/deploy/nginx.tls.example.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    profiles:
+      - tls
+
   postgres:
     image: postgres:16-alpine
     environment:
