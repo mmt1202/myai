@@ -6,6 +6,7 @@ Implemented files:
 
 - `agent/run_store.py`
 - `agent/sqlite_run_store.py`
+- `agent/postgres_run_store.py`
 - `agent/events.py`
 - `agent/runtime.py`
 - `agent/lifecycle.py`
@@ -34,6 +35,7 @@ Implemented stores:
 ```text
 FileRunStore
 SQLiteRunStore
+PostgresRunStore scaffold
 ```
 
 Factories:
@@ -41,7 +43,8 @@ Factories:
 ```python
 file_run_store(output_root)
 sqlite_run_store(db_path)
-build_run_store(kind, output_root, sqlite_path=None)
+postgres_run_store(dsn=None, output_root=None, connect=False)
+build_run_store(kind, output_root, sqlite_path=None, postgres_dsn=None)
 ```
 
 Supported run store kinds:
@@ -50,12 +53,21 @@ Supported run store kinds:
 file
 sqlite
 sqlite3
+postgres
+postgresql
+pg
 ```
 
 `build_run_store()` defaults to file-backed storage. For SQLite, the default database path is:
 
 ```text
 <output_root>/runs.sqlite
+```
+
+For Postgres scaffold, the DSN is read from:
+
+```text
+FOUNDATION_AGENT_RUN_POSTGRES_DSN
 ```
 
 Core operations:
@@ -85,7 +97,7 @@ SQLite also implements `append_event(run_id, event)`. Runtime uses this for live
 
 ## Run listing/query
 
-Both stores expose:
+Both file and SQLite stores expose:
 
 ```python
 list_runs(
@@ -148,6 +160,45 @@ python agent/lifecycle.py --run-store sqlite --sqlite-path outputs/agent_runtime
 ```
 
 This is a lease primitive, not a complete task queue.
+
+## Postgres scaffold
+
+`PostgresRunStore` is currently a contract scaffold only. It does not connect to Postgres in core runtime/tests and does not perform real persistence yet.
+
+It supports:
+
+- `safe_run_id(...)`
+- `run_dir(...)`
+- `artifact_path(...)`
+- `metadata()`
+- config selection through `build_run_store("postgres", ...)`
+- CLI selection through `agent/lifecycle.py --run-store postgres`
+- API selection through `FOUNDATION_AGENT_RUN_STORE=postgres`
+
+It intentionally raises `PostgresRunStoreUnavailable` for runtime operations such as:
+
+```text
+load_request
+save_request
+load_report
+save_report
+load_events
+list_runs
+claim_run
+status
+```
+
+This prevents callers from mistaking the scaffold for a production Postgres implementation.
+
+Example config:
+
+```bash
+FOUNDATION_AGENT_RUN_STORE=postgres \
+FOUNDATION_AGENT_RUN_POSTGRES_DSN=postgresql://user:pass@localhost:5432/myai \
+python inference/api_server.py --skip-model-load
+```
+
+The above only selects the scaffold until a real Postgres implementation is added.
 
 ## Event storage and reads
 
@@ -244,8 +295,9 @@ The API endpoints call lifecycle/run store functions:
 The API server selects the store through environment variables:
 
 ```text
-FOUNDATION_AGENT_RUN_STORE=file|sqlite
+FOUNDATION_AGENT_RUN_STORE=file|sqlite|postgres
 FOUNDATION_AGENT_RUN_DB=outputs/agent_runtime/runs.sqlite
+FOUNDATION_AGENT_RUN_POSTGRES_DSN=postgresql://user:pass@host:5432/db
 ```
 
 Default behavior remains file-backed.
@@ -278,18 +330,20 @@ This keeps file paths and store keys from path traversal.
 
 ## Current limitations
 
-- Implemented stores are `FileRunStore` and local `SQLiteRunStore`.
+- Implemented runtime stores are `FileRunStore` and local `SQLiteRunStore`.
+- `PostgresRunStore` is scaffold-only and raises explicit unavailable errors for runtime operations.
 - Runtime still writes compatibility file artifacts.
 - File-backed listing scans local run directories and is not intended for large-scale production search.
 - SQLite listing uses local SQLite/Python filtering and is not a distributed query service.
 - SQLite DB-backed events are local-node events, not a distributed event bus.
 - Worker leases are cooperative and local-store based; they are not a full task queue.
-- No Postgres implementation yet; SQLite is local-only and not distributed.
+- No real Postgres persistence implementation yet.
 - No distributed worker scheduler yet.
 - SSE is still polling-based, not WebSocket or push-based infrastructure.
 
 ## Next steps
 
-- Add Postgres run store implementation.
+- Implement real Postgres persistence using psycopg/asyncpg.
+- Add migrations for Postgres run store tables.
 - Add full worker queue/dispatcher semantics on top of leases.
 - Add richer search indexes if run volume grows.
