@@ -9,6 +9,7 @@
 - 文本生成基础运行时。
 - router、token counter、cost estimator、usage ledger、provider usage reconciliation。
 - configurable primary model routing：主模型不写死，支持 request / env / project / workspace / task / global 多层选择。
+- workspace/project model settings API：支持通过 API 设置 workspace/project 的 primary/fallback，并自动覆盖默认路由策略。
 - memory、rules、skills、MCP-style adapter。
 - auth、audit、rate limit、workspace quota。
 - file/SQLite/Postgres run store 与 quota backend。
@@ -18,7 +19,10 @@
 - API quota、health/readiness、queue observability、deployment profile、secret resolver、metrics、backup plan、preflight、TLS template。
 - `configs/model_versions.json`：active model version 已注册，不再为空。
 - `configs/model_routing_policy.json`：可配置 primary/fallback/task route 策略已完成。
-- `services/model_preferences.py`：request/env/project/workspace/task/global 主模型解析已完成。
+- `services/model_preferences.py`：request/env/project/workspace/task/global 主模型解析已完成，并会叠加 runtime settings store。
+- `services/model_settings_store.py`：workspace/project runtime settings store 已完成。
+- `inference/model_settings_api.py`：workspace/project model settings API handlers 已完成。
+- `inference/api_server.py`：已暴露 `/v1/model/settings/*`、`/v1/model/preferences/resolve`、`/v1/model/route`。
 - `inference/model_router.py`：已接入 preference boost、fallback chain、privacy/context/output/cost guard。
 - `configs/model_instance_registry.json`：已新增 `external.openai.primary` 作为可选 primary candidate，同时保留 Claude/Gemini/DeepSeek/Qwen/local 等候选。
 - `docs/CONFIGURABLE_PRIMARY_MODEL.md`：可配置主模型路线已记录。
@@ -71,6 +75,8 @@
 P0_contracts_implemented_v1 = true
 P1_foundation_runtime_implemented_v1 = true
 P1_configurable_primary_model_policy_implemented_v1 = true
+P1_workspace_project_model_settings_store_implemented_v1 = true
+P1_workspace_project_model_settings_api_implemented_v1 = true
 P1_request_workspace_project_task_model_override_implemented_v1 = true
 P1_model_route_privacy_context_cost_guards_implemented_v1 = true
 P1_model_fallback_chain_implemented_v1 = true
@@ -121,6 +127,7 @@ implementation_completed = false
 
 ## 禁止误判
 
+- workspace/project model settings API 完成，不等于 UI 管理后台已经完成。
 - 可配置主模型完成，不等于所有 provider 的账号、额度、模型名和真实调用都已配置成功。
 - `external.openai.primary` 只是一个可配置 primary candidate，不是系统写死的唯一主模型。
 - 仓库级 cloud profile 完成，不等于已经对某个云账号执行 `terraform apply`。
