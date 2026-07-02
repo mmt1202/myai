@@ -36,6 +36,7 @@ P1 foundation and hardening = completed_v1
 P1 configurable primary model routing = completed_v1
 P1 workspace/project model settings API = completed_v1
 P1 OpenAI Responses provider adapter = completed_v1
+P1 OpenAI Responses provider native streaming = completed_v1
 P2 foundation capabilities = completed_v1
 P3 drama pipeline = completed_v1
 ```
@@ -48,6 +49,7 @@ P1_workspace_project_model_settings_store_implemented_v1 = true
 P1_workspace_project_model_settings_api_implemented_v1 = true
 P1_openai_responses_provider_adapter_implemented_v1 = true
 P1_openai_responses_provider_smoke_implemented_v1 = true
+P1_openai_responses_native_streaming_implemented_v1 = true
 P1_request_workspace_project_task_model_override_implemented_v1 = true
 P1_model_route_privacy_context_cost_guards_implemented_v1 = true
 P1_model_fallback_chain_implemented_v1 = true
@@ -175,6 +177,18 @@ DELETE /v1/model/settings/projects/{project_id}
 
 ---
 
+## M012：OpenAI Responses Native Streaming
+
+状态：已完成。
+
+文件：`providers/openai_responses.py`、`scripts/openai_responses_smoke.py`。
+
+能力：支持 provider-native SSE stream、`stream=true` payload、`stream_options`、SSE `event:`/`data:` JSON 解析、delta/completed/error/usage 映射、dry-run stream smoke。
+
+测试：`tests.test_openai_responses_provider`、`tests.test_openai_responses_smoke`。
+
+---
+
 ## 仍未完成的真实外部专项
 
 ```text
@@ -192,5 +206,5 @@ DELETE /v1/model/settings/projects/{project_id}
 ## 下一阶段
 
 1. Admin UI / 前端管理页对接 workspace/project model settings API。
-2. OpenAI Responses provider native streaming。
-3. ForgePilot：Codex-like 本地开发 Agent 外壳。
+2. ForgePilot：Codex-like 本地开发 Agent 外壳。
+3. Provider live eval / live smoke 矩阵。
