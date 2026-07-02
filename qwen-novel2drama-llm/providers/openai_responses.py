@@ -6,9 +6,9 @@ import os
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
-from providers.base import BaseProvider, ProviderError, normalize_usage, output_text_block, response_envelope
+from providers.base import BaseProvider, ProviderError, normalize_usage, output_text_block, provider_stream_event, response_envelope
 
 
 RESPONSES_PATH = "/responses"
@@ -110,6 +110,12 @@ class OpenAIResponsesProvider(BaseProvider):
             payload["metadata"] = request["metadata"]
         if request.get("store") is not None:
             payload["store"] = bool(request["store"])
+        if request.get("stream"):
+            payload["stream"] = True
+            if request.get("stream_options"):
+                payload["stream_options"] = request["stream_options"]
+            elif request.get("stream_include_obfuscation") is not None:
+                payload["stream_options"] = {"include_obfuscation": bool(request["stream_include_obfuscation"])}
         return payload
 
     def build_http_request(self, payload: dict[str, Any]) -> urllib.request.Request:
@@ -120,6 +126,8 @@ class OpenAIResponsesProvider(BaseProvider):
             return str(data.get("output_text") or "")
         parts: list[str] = []
         for item in data.get("output") or []:
+            if not isinstance(item, dict):
+                continue
             for content in item.get("content") or []:
                 if isinstance(content, dict) and content.get("type") in {"output_text", "text"}:
                     parts.append(str(content.get("text") or ""))
@@ -138,7 +146,7 @@ class OpenAIResponsesProvider(BaseProvider):
         )
 
     def generate(self, request: dict[str, Any]) -> dict[str, Any]:
-        payload = self.build_payload(request)
+        payload = self.build_payload({**request, "stream": False})
         if self.is_dry_run(request):
             return response_envelope(
                 status="ok",
@@ -160,6 +168,165 @@ class OpenAIResponsesProvider(BaseProvider):
             raise ProviderError("provider_unavailable", str(exc), retryable=True) from exc
         return self.parse_response(data, request)
 
+    def iter_sse_json(self, response: Any) -> Iterator[dict[str, Any]]:
+        event_name: str | None = None
+        data_lines: list[str] = []
+        for raw_line in response:
+            line = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else str(raw_line)
+            line = line.rstrip("\r\n")
+            if not line:
+                if data_lines:
+                    text = "\n".join(data_lines)
+                    data_lines = []
+                    if text == "[DONE]":
+                        return
+                    try:
+                        payload = json.loads(text)
+                    except json.JSONDecodeError as exc:
+                        raise ProviderError("provider_error", f"invalid provider stream chunk: {text}", details={"line": text}) from exc
+                    if event_name and isinstance(payload, dict) and not payload.get("type"):
+                        payload["type"] = event_name
+                    event_name = None
+                    yield payload
+                continue
+            if line.startswith(":"):
+                continue
+            if line.startswith("event:"):
+                event_name = line[len("event:") :].strip()
+                continue
+            if line.startswith("data:"):
+                data_lines.append(line[len("data:") :].strip())
+        if data_lines:
+            text = "\n".join(data_lines)
+            if text != "[DONE]":
+                try:
+                    payload = json.loads(text)
+                except json.JSONDecodeError as exc:
+                    raise ProviderError("provider_error", f"invalid provider stream chunk: {text}", details={"line": text}) from exc
+                if event_name and isinstance(payload, dict) and not payload.get("type"):
+                    payload["type"] = event_name
+                yield payload
+
+    def stream_delta_from_event(self, data: dict[str, Any]) -> str:
+        for key in ("delta", "text"):
+            if data.get(key) is not None:
+                return str(data.get(key) or "")
+        if isinstance(data.get("item"), dict):
+            item = data["item"]
+            if item.get("type") in {"output_text", "text"} and item.get("text") is not None:
+                return str(item.get("text") or "")
+        return ""
+
+    def stream_usage_from_event(self, data: dict[str, Any]) -> dict[str, Any]:
+        response = data.get("response") if isinstance(data.get("response"), dict) else data
+        usage = response.get("usage") if isinstance(response, dict) else None
+        return normalize_usage(usage or {}) if usage else {}
+
+    def stream_output_from_completed_event(self, data: dict[str, Any], collected: list[str]) -> dict[str, Any]:
+        response = data.get("response") if isinstance(data.get("response"), dict) else data
+        text = self.extract_output_text(response if isinstance(response, dict) else {}) or "".join(collected)
+        output: dict[str, Any] = {"content": [output_text_block(text)], "raw_event_type": data.get("type")}
+        if isinstance(response, dict):
+            output["raw_response_id"] = response.get("id")
+            output["raw_status"] = response.get("status")
+            output["raw_output"] = response.get("output") or []
+        return output
+
+    def is_terminal_stream_event(self, data: dict[str, Any]) -> bool:
+        event_type = str(data.get("type") or "")
+        return event_type.endswith("completed") or event_type in {"response.completed", "response.done"}
+
+    def is_error_stream_event(self, data: dict[str, Any]) -> bool:
+        event_type = str(data.get("type") or "")
+        return event_type.endswith("failed") or event_type.endswith("error") or event_type in {"error", "response.failed", "response.error"}
+
+    def stream_generate(self, request: dict[str, Any]) -> Iterator[dict[str, Any]]:
+        stream_request = {**request, "stream": True}
+        payload = self.build_payload(stream_request)
+        request_id_value = request.get("request_id")
+        trace_id = request.get("trace_id")
+        model_info = {"model_id": self.model_id(), "provider": self.provider_name, "provider_model": payload["model"]}
+        yield provider_stream_event(
+            "provider_stream_started",
+            request_id_value=request_id_value,
+            trace_id=trace_id,
+            model=model_info,
+            metadata={"provider": self.provider_name, "url": f"{self.base_url}{RESPONSES_PATH}", "native_stream": True},
+        )
+        if self.is_dry_run(request):
+            yield provider_stream_event(
+                "provider_stream_delta",
+                request_id_value=request_id_value,
+                trace_id=trace_id,
+                model=model_info,
+                delta=json.dumps({"dry_run": True, "provider_payload": payload}, ensure_ascii=False),
+                index=0,
+                metadata={"dry_run": True, "native_stream": True},
+            )
+            yield provider_stream_event(
+                "provider_stream_completed",
+                request_id_value=request_id_value,
+                trace_id=trace_id,
+                model=model_info,
+                output={"dry_run": True, "provider_payload": payload, "url": f"{self.base_url}{RESPONSES_PATH}"},
+                done=True,
+                metadata={"dry_run": True, "native_stream": True},
+            )
+            return
+        if not os.environ.get(self.api_key_env):
+            raise ProviderError("provider_auth_missing", f"missing API key env: {self.api_key_env}", retryable=False)
+        collected: list[str] = []
+        usage: dict[str, Any] = {}
+        completed_output: dict[str, Any] | None = None
+        try:
+            with urllib.request.urlopen(self.build_http_request(payload), timeout=self.timeout) as response:
+                for data in self.iter_sse_json(response):
+                    event_type = str(data.get("type") or "response.event")
+                    if self.is_error_stream_event(data):
+                        error = data.get("error") if isinstance(data.get("error"), dict) else {"message": data.get("message") or event_type}
+                        raise ProviderError("provider_error", str(error.get("message") or event_type), retryable=False, details={"event": data})
+                    event_usage = self.stream_usage_from_event(data)
+                    if event_usage:
+                        usage = event_usage
+                    delta = self.stream_delta_from_event(data)
+                    if delta:
+                        collected.append(delta)
+                        yield provider_stream_event(
+                            "provider_stream_delta",
+                            request_id_value=request_id_value,
+                            trace_id=trace_id,
+                            model=model_info,
+                            delta=delta,
+                            index=len(collected) - 1,
+                            metadata={"raw_event_type": event_type, "raw_event_id": data.get("id")},
+                        )
+                    elif event_type and not self.is_terminal_stream_event(data):
+                        yield provider_stream_event(
+                            "provider_stream_event",
+                            request_id_value=request_id_value,
+                            trace_id=trace_id,
+                            model=model_info,
+                            metadata={"raw_event_type": event_type, "raw_event": data},
+                        )
+                    if self.is_terminal_stream_event(data):
+                        completed_output = self.stream_output_from_completed_event(data, collected)
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise ProviderError("provider_error", f"HTTP {exc.code}: {body}", retryable=exc.code >= 500, details={"status": exc.code}) from exc
+        except urllib.error.URLError as exc:
+            raise ProviderError("provider_unavailable", str(exc), retryable=True) from exc
+        output = completed_output or {"content": [output_text_block("".join(collected))]}
+        yield provider_stream_event(
+            "provider_stream_completed",
+            request_id_value=request_id_value,
+            trace_id=trace_id,
+            model=model_info,
+            output=output,
+            usage=usage,
+            done=True,
+            metadata={"native_stream": True, "collected_delta_count": len(collected)},
+        )
+
 
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -172,13 +339,14 @@ def main() -> int:
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--api-key-env", default=None)
     parser.add_argument("--timeout", type=int, default=120)
+    parser.add_argument("--stream", action="store_true")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
     request = load_json(Path(args.request))
     model_instance = load_json(Path(args.model_instance)) if args.model_instance else {}
     provider = OpenAIResponsesProvider(model_instance, base_url=args.base_url, api_key_env=args.api_key_env, timeout=args.timeout)
     try:
-        result = provider.generate(request)
+        result: Any = list(provider.stream_generate(request)) if args.stream else provider.generate(request)
     except ProviderError as exc:
         result = response_envelope(status="failed", request_id_value=request.get("request_id"), trace_id=request.get("trace_id"), error=exc.to_error(request.get("trace_id"), request.get("request_id")))
     text = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
@@ -187,7 +355,8 @@ def main() -> int:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(text, encoding="utf-8")
     print(text, end="")
-    return 0 if result.get("status") == "ok" else 1
+    status = result[-1].get("event_type") if isinstance(result, list) and result else result.get("status", "ok")
+    return 0 if status in {"ok", "provider_stream_completed"} else 1
 
 
 if __name__ == "__main__":
