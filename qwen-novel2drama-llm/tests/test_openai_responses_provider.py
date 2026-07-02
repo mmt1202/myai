@@ -51,6 +51,12 @@ class OpenAIResponsesProviderTests(unittest.TestCase):
         self.assertEqual(user_message["content"][1]["type"], "input_image")
         self.assertEqual(user_message["content"][2]["type"], "input_file")
 
+    def test_generic_model_api_key_does_not_override_registry_openai_key(self) -> None:
+        provider = OpenAIResponsesProvider(MODEL_INSTANCE, api_key_env="MODEL_API_KEY")
+        self.assertEqual(provider.api_key_env, "OPENAI_API_KEY")
+        explicit = OpenAIResponsesProvider(MODEL_INSTANCE, api_key_env="CUSTOM_OPENAI_KEY")
+        self.assertEqual(explicit.api_key_env, "CUSTOM_OPENAI_KEY")
+
     def test_dry_run_returns_provider_payload_without_network(self) -> None:
         provider = OpenAIResponsesProvider(MODEL_INSTANCE, base_url="https://api.example/v1")
         result = provider.generate({"dry_run": True, "input": [{"type": "text", "text": "hello"}]})
