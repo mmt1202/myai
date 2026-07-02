@@ -17,6 +17,13 @@ class OpenAIResponsesSmokeTests(unittest.TestCase):
         self.assertEqual(report["mode"], "dry_run")
         self.assertTrue(report["result"]["output"]["dry_run"])
 
+    def test_dry_run_stream_smoke_passes_without_live_credentials(self) -> None:
+        report = run_smoke(project_root=PROJECT_ROOT, live=False, stream=True, base_url="https://api.example/v1")
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["mode"], "dry_run_stream")
+        self.assertEqual(report["result"][-1]["event_type"], "provider_stream_completed")
+        self.assertTrue(report["result"][-1]["done"])
+
 
 if __name__ == "__main__":
     unittest.main()
