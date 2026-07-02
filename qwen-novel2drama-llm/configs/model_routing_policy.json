@@ -1,0 +1,48 @@
+{
+  "policy_name": "configurable_primary_model_policy_v1",
+  "principle": "Primary model is configurable by request, project, workspace, task and global defaults. No provider is hard-coded as the only primary model.",
+  "global": {
+    "default_primary_model": "external.openai.primary",
+    "fallback_models": [
+      "external.anthropic.claude",
+      "external.gemini.multimodal",
+      "external.deepseek.chat",
+      "external.qwen_dashscope.omni",
+      "local.qwen2_5_1_5b_instruct"
+    ],
+    "cheap_models": ["external.deepseek.chat", "external.qwen_dashscope.omni", "local.qwen2_5_1_5b_instruct"],
+    "private_models": ["local.qwen2_5_1_5b_instruct"]
+  },
+  "task_routes": {
+    "coding": {
+      "primary": "external.openai.primary",
+      "fallback": ["external.anthropic.claude", "external.deepseek.chat", "external.qwen_dashscope.omni"]
+    },
+    "drama": {
+      "primary": "external.anthropic.claude",
+      "fallback": ["external.openai.primary", "external.qwen_dashscope.omni", "external.deepseek.chat"]
+    },
+    "cheap_summary": {
+      "primary": "external.deepseek.chat",
+      "fallback": ["external.qwen_dashscope.omni", "local.qwen2_5_1_5b_instruct"]
+    },
+    "private": {
+      "primary": "local.qwen2_5_1_5b_instruct",
+      "fallback": []
+    },
+    "multimodal": {
+      "primary": "external.gemini.multimodal",
+      "fallback": ["external.qwen_dashscope.omni", "external.anthropic.claude", "external.openai.primary"]
+    }
+  },
+  "workspaces": {},
+  "projects": {},
+  "guards": {
+    "privacy_local_only_forces_private_models": true,
+    "max_cost_request_field": "max_estimated_cost",
+    "context_guard_enabled": true,
+    "allow_request_override": true,
+    "allow_project_override": true,
+    "allow_workspace_override": true
+  }
+}
