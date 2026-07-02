@@ -5,15 +5,20 @@ import os
 from pathlib import Path
 from typing import Any
 
+from services.model_settings_store import load_policy_with_runtime_settings
 
 DEFAULT_POLICY_PATH = Path(__file__).resolve().parents[1] / "configs" / "model_routing_policy.json"
 
 
-def load_model_routing_policy(path: Path | str | None = None) -> dict[str, Any]:
+def load_model_routing_policy(path: Path | str | None = None, *, include_runtime_settings: bool = True) -> dict[str, Any]:
     policy_path = Path(path) if path else DEFAULT_POLICY_PATH
     if not policy_path.exists():
-        return {"global": {}, "task_routes": {}, "workspaces": {}, "projects": {}, "guards": {}}
-    return json.loads(policy_path.read_text(encoding="utf-8"))
+        policy = {"global": {}, "task_routes": {}, "workspaces": {}, "projects": {}, "guards": {}}
+    else:
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    if include_runtime_settings:
+        return load_policy_with_runtime_settings(policy, project_root=policy_path.resolve().parents[1] if len(policy_path.resolve().parents) > 1 else None)
+    return policy
 
 
 def infer_task_type(request: dict[str, Any]) -> str | None:
