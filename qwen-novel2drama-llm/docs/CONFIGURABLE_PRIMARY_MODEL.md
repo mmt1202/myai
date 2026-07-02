@@ -1,10 +1,8 @@
 # Configurable Primary Model Foundation
 
-MyAI Foundation must not hard-code any single provider as the only primary model. GPT-class, Claude-class, Gemini-class, DeepSeek, Qwen/DashScope and local models are all model candidates. The selected primary model is configurable by request, project, workspace, task and global defaults.
+MyAI Foundation must not hard-code any single provider as the only primary model. The selected primary model is configurable by request, environment, project, workspace, task and global defaults.
 
 ## Priority order
-
-Model preference resolution uses this order:
 
 ```text
 request override
@@ -21,34 +19,56 @@ request override
 ```text
 configs/model_routing_policy.json
 services/model_preferences.py
+services/model_settings_store.py
+inference/model_settings_api.py
 inference/model_router.py
+inference/api_server.py
 configs/model_instance_registry.json
-tests/test_model_preferences.py
-tests/test_configurable_model_router.py
 ```
 
 ## Runtime configuration
 
-Environment overrides:
-
 ```text
 FOUNDATION_PRIMARY_MODEL=<model_instance_id>
 FOUNDATION_FALLBACK_MODELS=<model_id_1>,<model_id_2>
+FOUNDATION_MODEL_SETTINGS_STORE=<settings_json_path>
 ```
 
-Policy file:
+Default policy:
 
 ```text
 configs/model_routing_policy.json
 ```
 
-Request override:
+Runtime settings store:
+
+```text
+outputs/model_settings/model_settings.json
+```
+
+The runtime settings store overlays workspace and project settings on top of the default policy.
+
+## Workspace / Project Settings API
+
+```text
+GET    /v1/model/settings
+GET    /v1/model/settings/workspaces/{workspace_id}
+PUT    /v1/model/settings/workspaces/{workspace_id}
+DELETE /v1/model/settings/workspaces/{workspace_id}
+GET    /v1/model/settings/projects/{project_id}
+PUT    /v1/model/settings/projects/{project_id}
+DELETE /v1/model/settings/projects/{project_id}
+POST   /v1/model/preferences/resolve
+POST   /v1/model/route
+```
+
+Request body for setting a scope:
 
 ```json
 {
-  "model_id": "external.deepseek.chat",
-  "fallback_models": ["external.qwen_dashscope.omni", "local.qwen2_5_1_5b_instruct"],
-  "input": [{"type": "text", "text": "hello"}]
+  "primary_model": "model.primary",
+  "fallback_models": ["model.backup"],
+  "metadata": {"reason": "workspace default"}
 }
 ```
 
@@ -70,28 +90,15 @@ These are only defaults. A workspace, project or request can override them.
 
 Implemented guards:
 
-- privacy guard: `privacy.local_only=true` forces private/local models
-- context guard: models are rejected when request usage exceeds `context_window`
-- output guard: models are rejected when expected output exceeds `max_output_tokens`
-- cost guard: `max_estimated_cost` can reject candidates over budget
+- privacy guard
+- context guard
+- output guard
+- cost guard
+- safe workspace/project ID guard
 
 ## Router output
 
-`route_model()` now returns:
-
-```json
-{
-  "selected_model_id": "...",
-  "fallback_chain": [],
-  "model_preferences": {
-    "primary_model": "...",
-    "fallback_models": [],
-    "preferred_model_ids": [],
-    "policy_name": "..."
-  },
-  "policy_hits": []
-}
-```
+`route_model()` returns selected model, fallback chain, model preferences and policy hits.
 
 ## Design rule
 
@@ -100,5 +107,5 @@ GPT-class models can be recommended defaults, but they are not hard-coded. The F
 ## Suggested tests
 
 ```bash
-python -m unittest tests.test_model_preferences tests.test_configurable_model_router tests.test_foundation_core_services tests.test_ci_profiles
+python -m unittest tests.test_model_preferences tests.test_model_settings_store tests.test_model_settings_api tests.test_model_settings_api_server tests.test_configurable_model_router tests.test_foundation_core_services tests.test_ci_profiles
 ```
