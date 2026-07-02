@@ -1,8 +1,29 @@
 {
   "registry_name": "model_instance_registry_v1",
-  "principle": "Model instances are concrete deployable or external models. They implement one or more abstract capabilities.",
+  "principle": "Model instances are concrete deployable or external models. Primary model selection is configurable and no provider is hard-coded as the only primary model.",
   "default_currency": "USD",
   "instances": [
+    {
+      "id": "external.openai.primary",
+      "provider": "openai",
+      "runtime": "openai_responses",
+      "model_name": "${OPENAI_MODEL}",
+      "aliases": ["frontier", "smart", "coding", "primary-candidate"],
+      "status": "configured_by_env",
+      "lifecycle": "active",
+      "capabilities": ["text.chat", "text.reason", "tool.calling", "vision.understand", "agent.run", "context.long"],
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "input_modalities": ["text", "image", "file"],
+      "output_modalities": ["text"],
+      "runtime_config": {"model_name_env": "OPENAI_MODEL", "api_key_env": "OPENAI_API_KEY", "compatibility_mode": "openai_responses"},
+      "cost": {"input_per_1m": null, "output_per_1m": null, "notes": "fill from selected OpenAI model pricing"},
+      "privacy": {"data_leaves_device": true, "zero_retention_supported": "account_dependent"},
+      "region": "provider_dependent",
+      "strengths": ["frontier reasoning", "coding", "long context", "tool calling", "vision input"],
+      "limits": ["external provider", "network dependency", "requires configured account and selected model"],
+      "replacement": null
+    },
     {
       "id": "local.qwen2_5_1_5b_instruct",
       "provider": "local",
