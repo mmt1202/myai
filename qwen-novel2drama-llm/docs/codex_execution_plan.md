@@ -2,9 +2,7 @@
 
 本文档用于让 Codex 按顺序继续完成 `qwen-novel2drama-llm` 的剩余工程任务。
 
-当前项目定位：可部署、可扩展、可观测、可审计、可路由、可控成本的 AI 大模型底座。
-
-AI 短剧/漫剧专项能力已进入 P3 v1。
+当前项目定位：**可配置主模型的 AI Foundation**。系统不绑定任何单一 provider，主模型可按 request、environment、project、workspace、task、global defaults 选择。
 
 ---
 
@@ -23,8 +21,9 @@ qwen-novel2drama-llm/
 ```bash
 python scripts/check_openapi_contract.py
 python -m unittest tests.test_openapi_contract_check tests.test_foundation_contracts
-python -m unittest tests.test_drama_pipeline tests.test_drama_api tests.test_ci_profiles
-python -m unittest tests.test_provider_catalog_resilience tests.test_multimodal_router tests.test_mcp_sdk_compat tests.test_eval_runner tests.test_tracing tests.test_audit_query tests.test_deploy_profile
+python -m unittest tests.test_model_preferences tests.test_configurable_model_router tests.test_foundation_core_services tests.test_ci_profiles
+python -m unittest tests.test_drama_pipeline tests.test_drama_api tests.test_media_generation
+python -m unittest tests.test_quality_gate tests.test_cloud_deploy_profile tests.test_external_queue tests.test_billing_usage_records tests.test_memory_quality
 ```
 
 ---
@@ -33,99 +32,130 @@ python -m unittest tests.test_provider_catalog_resilience tests.test_multimodal_
 
 ```text
 P1 foundation and hardening = completed_v1
+P1 configurable primary model routing = completed_v1
 P2 foundation capabilities = completed_v1
 P3 drama pipeline = completed_v1
 ```
 
-P3 完成标记：
+主模型配置完成标记：
 
 ```text
-P3_novel_parsing_implemented_v1 = true
-P3_novel_to_drama_outline_implemented_v1 = true
-P3_character_system_implemented_v1 = true
-P3_storyboard_planning_implemented_v1 = true
-P3_ai_video_prompt_generation_implemented_v1 = true
-P3_short_drama_quality_checks_implemented_v1 = true
-P3_short_drama_workflow_api_implemented_v1 = true
+P1_configurable_primary_model_policy_implemented_v1 = true
+P1_request_workspace_project_task_model_override_implemented_v1 = true
+P1_model_route_privacy_context_cost_guards_implemented_v1 = true
+P1_model_fallback_chain_implemented_v1 = true
 ```
 
 ---
 
-## P3-001：小说解析
+## M001：可配置 Primary Model
 
 状态：已完成。
 
-文件：`drama/novel_parser.py`。
+文件：`configs/model_routing_policy.json`、`services/model_preferences.py`、`inference/model_router.py`。
 
-能力：章节解析、人物抽取、世界观抽取、剧情线抽取。
-
-## P3-002：小说转短剧大纲
-
-状态：已完成。
-
-文件：`drama/outline.py`。
-
-能力：剧集结构、单集剧情、开场钩子、冲突升级、转折点、集尾悬念、series bible。
-
-## P3-003：角色设定系统
-
-状态：已完成。
-
-文件：`drama/characters.py`。
-
-能力：角色卡、人物关系、角色一致性规则、视觉 profile、声音 profile、定妆提示词。
-
-## P3-004：分镜规划
-
-状态：已完成。
-
-文件：`drama/storyboard.py`。
-
-能力：镜头列表、景别、镜头调度、动作、台词、旁白、时长估算。
-
-## P3-005：AI 视频提示词生成
-
-状态：已完成。
-
-文件：`drama/video_prompts.py`。
-
-能力：即梦、可灵、Runway、Pika 平台提示词适配。
-
-## P3-006：短剧质检
-
-状态：已完成。
-
-文件：`drama/quality.py`。
-
-能力：剧情连续性、角色覆盖、镜头可拍性、提示词完整性检查。
-
-## P3-007：短剧生产工作流 API
-
-状态：已完成。
-
-文件：`drama/pipeline.py`、`drama/api.py`、`drama/fastapi_router.py`。
-
-能力：从小说文本到解析、剧集大纲、角色系统、分镜、视频提示词、质量报告、资产包写出的完整 pipeline。
+能力：主模型不写死，支持 request/env/project/workspace/task/global 多层解析。
 
 ---
 
-## 仍未完成的外部专项
+## M002：Model Route Policy
+
+状态：已完成。
+
+文件：`configs/model_routing_policy.json`。
+
+能力：定义 global primary、fallback models、cheap models、private models、task routes。
+
+---
+
+## M003：Workspace Model Settings
+
+状态：已完成 contract。
+
+文件：`configs/model_routing_policy.json`、`services/model_preferences.py`。
+
+能力：policy 的 `workspaces` 节点支持 workspace 级 primary/fallback。
+
+---
+
+## M004：Project Model Settings
+
+状态：已完成 contract。
+
+文件：`configs/model_routing_policy.json`、`services/model_preferences.py`。
+
+能力：policy 的 `projects` 节点支持 project 级 primary/fallback。
+
+---
+
+## M005：Request Model Override
+
+状态：已完成。
+
+能力：单次请求可通过 `model_id`、`model`、`primary_model`、`fallback_models` 覆盖默认模型选择。
+
+---
+
+## M006：Provider Capability Registry
+
+状态：已完成 v1。
+
+文件：`configs/model_instance_registry.json`。
+
+能力：每个 model instance 声明 capabilities、context_window、max_output_tokens、input_modalities、output_modalities、privacy、cost、runtime_config。
+
+---
+
+## M007：Fallback Chain
+
+状态：已完成。
+
+能力：`route_model()` 输出 `fallback_chain`，且根据 policy preferred model order 排序。
+
+---
+
+## M008：Cost Guard
+
+状态：已完成。
+
+能力：请求可使用 `max_estimated_cost` 拒绝超预算候选。
+
+---
+
+## M009：Privacy Guard
+
+状态：已完成。
+
+能力：`privacy.local_only=true` 强制使用 private/local models。
+
+---
+
+## M010：Model Evaluation
+
+状态：已完成 v1。
+
+文件：`evals/quality_gate.py`、`evals/golden/*.json`。
+
+能力：已有 quality gate 和 golden dataset；后续可加入真实 provider live eval。
+
+---
+
+## 仍未完成的真实外部专项
 
 ```text
-Kubernetes / Terraform = not_completed
-AWS/GCP/Azure/Vault secret manager = not_completed
-证书、域名、WAF、CDN = not_completed
-Prometheus/Grafana/SLO deployment = not_completed
-backup policy and RPO/RTO drill = not_completed
-external MQ / cross-region scheduling = not_completed
-billing invoice import/export = not_completed
-real image/audio/video provider execution and asset hosting = not_completed
+真实 Kubernetes cluster / terraform apply = external_required
+真实 AWS/GCP/Azure/Vault SDK 权限 = external_required
+真实域名、证书、WAF、CDN 绑定 = external_required
+真实 Redis/RabbitMQ/SQS/PubSub 连接 = external_required
+真实 provider 账单格式 = external_required
+真实媒体平台 endpoint / callback / 存储桶 = external_required
+真实 OpenAI/Claude/Gemini/DeepSeek/Qwen 账号与模型名 smoke test = external_required
 ```
 
 ---
 
 ## 下一阶段
 
-1. Cloud deployment specialization。
-2. External queue / billing / asset provider integration。
-3. Human review workspace and production asset management。
+1. OpenAI Responses provider live adapter smoke。
+2. Workspace/project model settings API。
+3. ForgePilot：Codex-like 本地开发 Agent 外壳。
