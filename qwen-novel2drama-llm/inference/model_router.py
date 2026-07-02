@@ -8,6 +8,7 @@ from typing import Any
 
 from services.token_counter import estimate_request_usage
 from services.cost_estimator import estimate_cost_for_usage
+from services.model_preferences import load_model_routing_policy, preference_boost, preference_rank, resolve_model_preferences
 
 ROUTE_MODE_WEIGHTS: dict[str, dict[str, float]] = {
     "smart": {"quality": 0.55, "capability_match": 0.25, "latency": 0.10, "cost": 0.05, "privacy": 0.05},
@@ -63,6 +64,10 @@ def rejects_reason(instance: dict[str, Any], request: dict[str, Any], usage: dic
     context_window = instance.get("context_window")
     if isinstance(context_window, int) and context_window > 0 and usage.get("total_tokens", 0) > context_window:
         return "context_window_exceeded"
+    max_output_tokens = instance.get("max_output_tokens")
+    expected_output_tokens = int(request.get("expected_output_tokens") or request.get("max_output_tokens") or 512)
+    if isinstance(max_output_tokens, int) and max_output_tokens > 0 and expected_output_tokens > max_output_tokens:
+        return "max_output_exceeded"
     if instance.get("lifecycle") == "deprecated" and not request.get("allow_deprecated"):
         return "deprecated_model"
     return None
@@ -115,7 +120,7 @@ def drama_relevance_score(instance: dict[str, Any]) -> float:
     return 0.25
 
 
-def score_instance(instance: dict[str, Any], route_mode: str, required_capabilities: set[str]) -> dict[str, Any]:
+def score_instance(instance: dict[str, Any], route_mode: str, required_capabilities: set[str], preferences: dict[str, Any] | None = None) -> dict[str, Any]:
     metrics = {
         "quality": quality_score(instance),
         "cost": value_cost_score(instance),
@@ -125,14 +130,40 @@ def score_instance(instance: dict[str, Any], route_mode: str, required_capabilit
         "drama_relevance": drama_relevance_score(instance),
     }
     weights = ROUTE_MODE_WEIGHTS.get(route_mode, ROUTE_MODE_WEIGHTS["balanced"])
-    total = sum(metrics[key] * weight for key, weight in weights.items())
-    return {"score": round(total, 6), "metrics": metrics, "weights": weights}
+    base_total = sum(metrics[key] * weight for key, weight in weights.items())
+    boost = preference_boost(instance.get("id"), preferences or {})
+    total = base_total + boost
+    return {"score": round(total, 6), "base_score": round(base_total, 6), "preference_boost": round(boost, 6), "metrics": metrics, "weights": weights}
 
 
-def route_model(request: dict[str, Any], instances_registry: dict[str, Any]) -> dict[str, Any]:
+def candidate_allowed_by_cost(candidate: dict[str, Any], preferences: dict[str, Any]) -> bool:
+    max_cost = preferences.get("max_estimated_cost")
+    if max_cost is None:
+        return True
+    try:
+        limit = float(max_cost)
+    except (TypeError, ValueError):
+        return True
+    estimated = ((candidate.get("estimated_cost") or {}).get("estimated"))
+    return float(estimated or 0.0) <= limit
+
+
+def sort_candidates(candidates: list[dict[str, Any]], preferences: dict[str, Any]) -> list[dict[str, Any]]:
+    def key(item: dict[str, Any]) -> tuple[float, int, float]:
+        model_id = str(item.get("model_id") or "")
+        rank = preference_rank(model_id, preferences)
+        preferred = 1.0 if rank is not None else 0.0
+        inverse_rank = 10_000 - (rank if rank is not None else 9_999)
+        return (preferred, inverse_rank, float(item.get("score") or 0.0))
+
+    return sorted(candidates, key=key, reverse=True)
+
+
+def route_model(request: dict[str, Any], instances_registry: dict[str, Any], policy: dict[str, Any] | None = None) -> dict[str, Any]:
     route_mode = request.get("route_mode") or "balanced"
-    expected_output_tokens = int(request.get("expected_output_tokens") or 512)
+    expected_output_tokens = int(request.get("expected_output_tokens") or request.get("max_output_tokens") or 512)
     usage = estimate_request_usage(request, expected_output_tokens=expected_output_tokens)
+    preferences = resolve_model_preferences(request, policy or load_model_routing_policy())
     required_capabilities = normalize_required_capabilities(request, route_mode)
     required_modalities = content_modalities(request)
     candidates = []
@@ -142,24 +173,33 @@ def route_model(request: dict[str, Any], instances_registry: dict[str, Any]) -> 
         if reason:
             rejected.append({"model_id": instance.get("id"), "reason": reason})
             continue
-        score = score_instance(instance, route_mode, required_capabilities)
+        score = score_instance(instance, route_mode, required_capabilities, preferences)
         cost = estimate_cost_for_usage(usage, instance, instances_registry.get("default_currency", "USD"))
-        candidates.append({"model_id": instance.get("id"), "provider": instance.get("provider"), "score": score["score"], "score_detail": score, "estimated_cost": cost})
-    candidates.sort(key=lambda item: item["score"], reverse=True)
+        candidate = {"model_id": instance.get("id"), "provider": instance.get("provider"), "score": score["score"], "score_detail": score, "estimated_cost": cost, "preference_rank": preference_rank(instance.get("id"), preferences)}
+        if not candidate_allowed_by_cost(candidate, preferences):
+            rejected.append({"model_id": instance.get("id"), "reason": "cost_guard"})
+            continue
+        candidates.append(candidate)
+    candidates = sort_candidates(candidates, preferences)
     selected = candidates[0] if candidates else None
+    fallback_chain = [item["model_id"] for item in candidates[1:4]]
     return {
         "request_id": request.get("request_id"),
         "trace_id": request.get("trace_id"),
         "route_mode": route_mode,
+        "task_type": preferences.get("task_type"),
+        "workspace_id": preferences.get("workspace_id"),
+        "project_id": preferences.get("project_id"),
         "required_capabilities": sorted(required_capabilities),
         "required_modalities": sorted(required_modalities),
         "candidate_model_ids": [item["model_id"] for item in candidates],
         "rejected_candidates": rejected,
         "selected_model_id": selected.get("model_id") if selected else None,
         "selected": selected,
-        "fallback_chain": [item["model_id"] for item in candidates[1:4]],
+        "fallback_chain": fallback_chain,
+        "model_preferences": {"primary_model": preferences.get("primary_model"), "fallback_models": preferences.get("fallback_models"), "preferred_model_ids": preferences.get("preferred_model_ids"), "policy_name": preferences.get("policy_name")},
         "estimated_usage": usage,
-        "policy_hits": [],
+        "policy_hits": preferences.get("policy_hits") or [],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "routed" if selected else "no_candidate",
     }
@@ -169,11 +209,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--request", required=True)
     parser.add_argument("--instances", default="configs/model_instance_registry.json")
+    parser.add_argument("--policy", default="configs/model_routing_policy.json")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
     request = load_json(Path(args.request))
     registry = load_json(Path(args.instances))
-    result = route_model(request, registry)
+    policy = load_json(Path(args.policy)) if args.policy else None
+    result = route_model(request, registry, policy=policy)
     text = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
     if args.output:
         output_path = Path(args.output)
