@@ -59,7 +59,23 @@ tool_choice
 response_format
 metadata
 store
+stream
+stream_options
 ```
+
+## Native streaming
+
+The adapter now supports provider-native Responses streaming:
+
+```text
+request stream=true -> provider payload stream=true
+SSE event/data parser -> iter_sse_json()
+response.output_text.delta-style events -> provider_stream_delta
+response.completed-style events -> provider_stream_completed
+response.failed/error-style events -> ProviderError
+```
+
+The stream implementation intentionally keeps raw provider event metadata in each emitted event so future Responses event variants remain debuggable.
 
 ## Dry run
 
@@ -72,7 +88,7 @@ Every CI-safe provider path should use:
 }
 ```
 
-Dry run returns the provider payload and does not call the network.
+Dry run returns the provider payload and does not call the network. Dry-run streaming also works and emits started/delta/completed events.
 
 ## Smoke script
 
@@ -82,10 +98,17 @@ Dry run smoke:
 python scripts/openai_responses_smoke.py
 ```
 
+Dry run stream smoke:
+
+```bash
+python scripts/openai_responses_smoke.py --stream
+```
+
 Live smoke, only after real env values are configured:
 
 ```bash
 python scripts/openai_responses_smoke.py --live
+python scripts/openai_responses_smoke.py --live --stream
 ```
 
 Live smoke returns `skipped` when no API key is configured and `failed` only when a configured live call fails.
@@ -93,5 +116,5 @@ Live smoke returns `skipped` when no API key is configured and `failed` only whe
 ## Boundaries
 
 - Adapter implemented does not mean a real OpenAI account, model name, billing, org policy, or API key has been configured.
-- Streaming for Responses is not yet provider-native in this adapter; non-streaming generate and BaseProvider fallback stream are available.
+- Native streaming is implemented at the SSE event parser level, but live behavior still requires a configured API key, model name and model access.
 - Audio/video blocks are not uploaded as native Responses media in v1; they are represented as text placeholders until a dedicated file upload/media path is added.
