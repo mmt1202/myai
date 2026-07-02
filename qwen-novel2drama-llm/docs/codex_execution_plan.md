@@ -22,6 +22,7 @@ qwen-novel2drama-llm/
 python scripts/check_openapi_contract.py
 python -m unittest tests.test_openapi_contract_check tests.test_foundation_contracts
 python -m unittest tests.test_model_preferences tests.test_model_settings_store tests.test_model_settings_api tests.test_model_settings_api_server tests.test_configurable_model_router tests.test_foundation_core_services tests.test_ci_profiles
+python -m unittest tests.test_openai_responses_provider tests.test_openai_responses_smoke
 python -m unittest tests.test_drama_pipeline tests.test_drama_api tests.test_media_generation
 python -m unittest tests.test_quality_gate tests.test_cloud_deploy_profile tests.test_external_queue tests.test_billing_usage_records tests.test_memory_quality
 ```
@@ -34,6 +35,7 @@ python -m unittest tests.test_quality_gate tests.test_cloud_deploy_profile tests
 P1 foundation and hardening = completed_v1
 P1 configurable primary model routing = completed_v1
 P1 workspace/project model settings API = completed_v1
+P1 OpenAI Responses provider adapter = completed_v1
 P2 foundation capabilities = completed_v1
 P3 drama pipeline = completed_v1
 ```
@@ -44,6 +46,8 @@ P3 drama pipeline = completed_v1
 P1_configurable_primary_model_policy_implemented_v1 = true
 P1_workspace_project_model_settings_store_implemented_v1 = true
 P1_workspace_project_model_settings_api_implemented_v1 = true
+P1_openai_responses_provider_adapter_implemented_v1 = true
+P1_openai_responses_provider_smoke_implemented_v1 = true
 P1_request_workspace_project_task_model_override_implemented_v1 = true
 P1_model_route_privacy_context_cost_guards_implemented_v1 = true
 P1_model_fallback_chain_implemented_v1 = true
@@ -159,6 +163,18 @@ DELETE /v1/model/settings/projects/{project_id}
 
 ---
 
+## M011：OpenAI Responses Provider Adapter
+
+状态：已完成。
+
+文件：`providers/openai_responses.py`、`providers/factory.py`、`scripts/openai_responses_smoke.py`。
+
+能力：`runtime=openai_responses` 自动走 Responses adapter；支持 text/image/file input mapping、tools、tool_choice、dry-run、response parsing、missing key preflight。
+
+测试：`tests.test_openai_responses_provider`、`tests.test_openai_responses_smoke`。
+
+---
+
 ## 仍未完成的真实外部专项
 
 ```text
@@ -168,13 +184,13 @@ DELETE /v1/model/settings/projects/{project_id}
 真实 Redis/RabbitMQ/SQS/PubSub 连接 = external_required
 真实 provider 账单格式 = external_required
 真实媒体平台 endpoint / callback / 存储桶 = external_required
-真实 OpenAI/Claude/Gemini/DeepSeek/Qwen 账号与模型名 smoke test = external_required
+真实 OpenAI/Claude/Gemini/DeepSeek/Qwen 账号与模型名 live smoke = external_required
 ```
 
 ---
 
 ## 下一阶段
 
-1. OpenAI Responses provider live adapter smoke。
-2. Admin UI / 前端管理页对接 workspace/project model settings API。
+1. Admin UI / 前端管理页对接 workspace/project model settings API。
+2. OpenAI Responses provider native streaming。
 3. ForgePilot：Codex-like 本地开发 Agent 外壳。
