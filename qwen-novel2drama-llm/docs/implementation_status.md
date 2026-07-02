@@ -16,6 +16,7 @@
 - Agent events、lifecycle、runtime、tool loop、worker dispatcher、worker pool。
 - Postgres migration runner/history。
 - provider continuation、provider smoke、local/openai-compatible provider contracts。
+- OpenAI Responses provider adapter：`runtime=openai_responses` 已有专用 provider、dry-run、payload 映射、smoke script。
 - API quota、health/readiness、queue observability、deployment profile、secret resolver、metrics、backup plan、preflight、TLS template。
 - `configs/model_versions.json`：active model version 已注册，不再为空。
 - `configs/model_routing_policy.json`：可配置 primary/fallback/task route 策略已完成。
@@ -24,8 +25,11 @@
 - `inference/model_settings_api.py`：workspace/project model settings API handlers 已完成。
 - `inference/api_server.py`：已暴露 `/v1/model/settings/*`、`/v1/model/preferences/resolve`、`/v1/model/route`。
 - `inference/model_router.py`：已接入 preference boost、fallback chain、privacy/context/output/cost guard。
+- `providers/openai_responses.py`：OpenAI Responses adapter 已完成。
+- `scripts/openai_responses_smoke.py`：OpenAI Responses dry-run/live smoke 已完成。
 - `configs/model_instance_registry.json`：已新增 `external.openai.primary` 作为可选 primary candidate，同时保留 Claude/Gemini/DeepSeek/Qwen/local 等候选。
 - `docs/CONFIGURABLE_PRIMARY_MODEL.md`：可配置主模型路线已记录。
+- `docs/OPENAI_RESPONSES_PROVIDER.md`：OpenAI Responses provider contract 已记录。
 - `docs/FOUNDATION_API_CONTRACT.md`：Foundation API 契约已固定。
 - `docs/FOUNDATION_BOUNDARY.md`：Foundation 与 ForgePilot 职责边界已固定。
 - `scripts/run_checks.py`：核心目录 compile、skills validate、MCP validate、router smoke 已纳入检查。
@@ -77,6 +81,8 @@ P1_foundation_runtime_implemented_v1 = true
 P1_configurable_primary_model_policy_implemented_v1 = true
 P1_workspace_project_model_settings_store_implemented_v1 = true
 P1_workspace_project_model_settings_api_implemented_v1 = true
+P1_openai_responses_provider_adapter_implemented_v1 = true
+P1_openai_responses_provider_smoke_implemented_v1 = true
 P1_request_workspace_project_task_model_override_implemented_v1 = true
 P1_model_route_privacy_context_cost_guards_implemented_v1 = true
 P1_model_fallback_chain_implemented_v1 = true
@@ -123,10 +129,11 @@ implementation_completed = false
 5. 真实 provider 账单文件需要接入具体平台导出格式。
 6. 平台专属媒体网关需要具体平台 endpoint、鉴权、额度、callback 和资产存储桶。
 7. 外部向量数据库和真实 embedding provider 尚未接入。
-8. OpenAI Responses provider 的真实 SDK 调用仍需按实际账号、模型和密钥配置做 smoke test。
+8. OpenAI Responses provider 的真实账号、模型名、密钥、组织策略、额度和 live smoke 仍需在部署环境配置。
 
 ## 禁止误判
 
+- OpenAI Responses adapter 完成，不等于真实 OpenAI API key、模型名、额度、组织策略已经配置成功。
 - workspace/project model settings API 完成，不等于 UI 管理后台已经完成。
 - 可配置主模型完成，不等于所有 provider 的账号、额度、模型名和真实调用都已配置成功。
 - `external.openai.primary` 只是一个可配置 primary candidate，不是系统写死的唯一主模型。
