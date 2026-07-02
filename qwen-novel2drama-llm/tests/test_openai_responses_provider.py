@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from providers.base import ProviderError
-from providers.factory import build_provider, generate_with_registry
+from providers.factory import build_provider, generate_with_registry, stream_generate_with_registry
 from providers.openai_responses import OpenAIResponsesProvider
 
 
@@ -51,6 +51,12 @@ class OpenAIResponsesProviderTests(unittest.TestCase):
         self.assertEqual(user_message["content"][1]["type"], "input_image")
         self.assertEqual(user_message["content"][2]["type"], "input_file")
 
+    def test_build_stream_payload_adds_stream_options(self) -> None:
+        provider = OpenAIResponsesProvider(MODEL_INSTANCE)
+        payload = provider.build_payload({"stream": True, "stream_include_obfuscation": False, "input": [{"type": "text", "text": "hello"}]})
+        self.assertTrue(payload["stream"])
+        self.assertEqual(payload["stream_options"], {"include_obfuscation": False})
+
     def test_generic_model_api_key_does_not_override_registry_openai_key(self) -> None:
         provider = OpenAIResponsesProvider(MODEL_INSTANCE, api_key_env="MODEL_API_KEY")
         self.assertEqual(provider.api_key_env, "OPENAI_API_KEY")
@@ -64,6 +70,39 @@ class OpenAIResponsesProviderTests(unittest.TestCase):
         self.assertTrue(result["output"]["dry_run"])
         self.assertEqual(result["output"]["url"], "https://api.example/v1/responses")
         self.assertIn("dry_run_no_provider_call", result["warnings"])
+
+    def test_dry_run_native_stream_returns_provider_payload(self) -> None:
+        provider = OpenAIResponsesProvider(MODEL_INSTANCE, base_url="https://api.example/v1")
+        events = list(provider.stream_generate({"dry_run": True, "input": [{"type": "text", "text": "hello"}]}))
+        self.assertEqual(events[0]["event_type"], "provider_stream_started")
+        self.assertEqual(events[1]["event_type"], "provider_stream_delta")
+        self.assertEqual(events[-1]["event_type"], "provider_stream_completed")
+        self.assertTrue(events[-1]["done"])
+        self.assertTrue(events[-1]["output"]["provider_payload"]["stream"])
+
+    def test_iter_sse_json_parses_event_and_data(self) -> None:
+        provider = OpenAIResponsesProvider(MODEL_INSTANCE)
+        lines = [
+            b"event: response.output_text.delta\n",
+            b"data: {\"delta\": \"he\"}\n",
+            b"\n",
+            b"data: {\"type\": \"response.output_text.delta\", \"delta\": \"llo\"}\n\n",
+            b"data: [DONE]\n\n",
+        ]
+        items = list(provider.iter_sse_json(lines))
+        self.assertEqual(items[0]["type"], "response.output_text.delta")
+        self.assertEqual(items[0]["delta"], "he")
+        self.assertEqual(items[1]["delta"], "llo")
+
+    def test_stream_event_helpers_map_delta_completed_and_usage(self) -> None:
+        provider = OpenAIResponsesProvider(MODEL_INSTANCE)
+        delta = {"type": "response.output_text.delta", "delta": "hello"}
+        completed = {"type": "response.completed", "response": {"id": "resp_1", "status": "completed", "output_text": "hello", "usage": {"input_tokens": 3, "output_tokens": 2}}}
+        self.assertEqual(provider.stream_delta_from_event(delta), "hello")
+        self.assertEqual(provider.stream_usage_from_event(completed)["input_tokens"], 3)
+        output = provider.stream_output_from_completed_event(completed, ["fallback"])
+        self.assertEqual(output["content"][0]["text"], "hello")
+        self.assertTrue(provider.is_terminal_stream_event(completed))
 
     def test_parse_response_extracts_output_text_and_usage(self) -> None:
         provider = OpenAIResponsesProvider(MODEL_INSTANCE)
@@ -79,6 +118,9 @@ class OpenAIResponsesProviderTests(unittest.TestCase):
         registry = {"instances": [MODEL_INSTANCE]}
         result = generate_with_registry({"model_id": "external.openai.primary", "dry_run": True, "input": [{"type": "text", "text": "hello"}]}, registry, base_url="https://api.example/v1")
         self.assertEqual(result["model"]["provider"], "openai_responses")
+        events = list(stream_generate_with_registry({"model_id": "external.openai.primary", "dry_run": True, "input": [{"type": "text", "text": "hello"}]}, registry, base_url="https://api.example/v1"))
+        self.assertEqual(events[-1]["event_type"], "provider_stream_completed")
+        self.assertTrue(events[-1]["metadata"]["native_stream"])
 
     def test_missing_api_key_fails_before_network(self) -> None:
         old = os.environ.get("OPENAI_API_KEY")
@@ -88,6 +130,9 @@ class OpenAIResponsesProviderTests(unittest.TestCase):
             with self.assertRaises(ProviderError) as ctx:
                 provider.generate({"input": [{"type": "text", "text": "hello"}]})
             self.assertEqual(ctx.exception.code, "provider_auth_missing")
+            with self.assertRaises(ProviderError) as stream_ctx:
+                list(provider.stream_generate({"input": [{"type": "text", "text": "hello"}]}))
+            self.assertEqual(stream_ctx.exception.code, "provider_auth_missing")
         finally:
             if old is not None:
                 os.environ["OPENAI_API_KEY"] = old
