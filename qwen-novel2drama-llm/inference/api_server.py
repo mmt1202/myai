@@ -29,6 +29,7 @@ from agent.run_store import RunStore, build_run_store, default_sqlite_path
 from agent.runtime import run_agent_once
 from agent.worker_dispatcher import list_queue
 from inference.model_router import route_model
+from inference.model_settings_api import delete_project_model_settings, delete_workspace_model_settings, get_project_model_settings, get_workspace_model_settings, list_model_settings, resolve_model_preferences_api, route_with_model_settings_api, set_project_model_settings, set_workspace_model_settings
 from mcp.adapter import FoundationMCPAdapter
 from providers.base import ProviderError, provider_stream_event, response_envelope
 from providers.factory import generate_with_registry, stream_generate_with_registry
@@ -406,7 +407,7 @@ def health() -> dict[str, str | None]:
 
 @app.get("/v1/health")
 def foundation_health() -> dict[str, Any]:
-    return {"status": "ok", "service": "myai-foundation", "model_version": ACTIVE_MODEL_VERSION, "model_path": ACTIVE_MODEL_PATH, "capabilities": ["router", "token", "cost", "memory", "memory_backend", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "agent_run_store", "agent_run_query", "agent_db_events", "provider", "provider_stream", "auth", "rate_limit", "workspace_quota", "api_quota", "queue_observability", "readiness", "audit"]}
+    return {"status": "ok", "service": "myai-foundation", "model_version": ACTIVE_MODEL_VERSION, "model_path": ACTIVE_MODEL_PATH, "capabilities": ["router", "model_settings", "token", "cost", "memory", "memory_backend", "rules", "skills", "mcp", "agent", "agent_events", "agent_lifecycle", "agent_run_store", "agent_run_query", "agent_db_events", "provider", "provider_stream", "auth", "rate_limit", "workspace_quota", "api_quota", "queue_observability", "readiness", "audit"]}
 
 
 @app.get("/v1/ready")
@@ -454,6 +455,72 @@ def route_api(body: dict[str, Any]) -> dict[str, Any]:
     route = route_model(body, model_instances())
     selected = route.get("selected") or {}
     return ok(body, {"route": route}, usage=route.get("estimated_usage"), cost=selected.get("estimated_cost"), route=route)
+
+
+@app.get("/v1/model/settings")
+def model_settings_list_api() -> dict[str, Any]:
+    return ok({}, list_model_settings(PROJECT_ROOT))
+
+
+@app.get("/v1/model/settings/workspaces/{workspace_id}")
+def model_settings_get_workspace_api(workspace_id: str) -> dict[str, Any]:
+    try:
+        return ok({}, get_workspace_model_settings(PROJECT_ROOT, workspace_id))
+    except ValueError as exc:
+        return failed({}, "invalid_model_settings_scope", str(exc))
+
+
+@app.put("/v1/model/settings/workspaces/{workspace_id}")
+def model_settings_put_workspace_api(workspace_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return ok(body, set_workspace_model_settings(PROJECT_ROOT, workspace_id, body))
+    except ValueError as exc:
+        return failed(body, "invalid_model_settings_scope", str(exc))
+
+
+@app.delete("/v1/model/settings/workspaces/{workspace_id}")
+def model_settings_delete_workspace_api(workspace_id: str) -> dict[str, Any]:
+    try:
+        return ok({}, delete_workspace_model_settings(PROJECT_ROOT, workspace_id))
+    except ValueError as exc:
+        return failed({}, "invalid_model_settings_scope", str(exc))
+
+
+@app.get("/v1/model/settings/projects/{project_id}")
+def model_settings_get_project_api(project_id: str) -> dict[str, Any]:
+    try:
+        return ok({}, get_project_model_settings(PROJECT_ROOT, project_id))
+    except ValueError as exc:
+        return failed({}, "invalid_model_settings_scope", str(exc))
+
+
+@app.put("/v1/model/settings/projects/{project_id}")
+def model_settings_put_project_api(project_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return ok(body, set_project_model_settings(PROJECT_ROOT, project_id, body))
+    except ValueError as exc:
+        return failed(body, "invalid_model_settings_scope", str(exc))
+
+
+@app.delete("/v1/model/settings/projects/{project_id}")
+def model_settings_delete_project_api(project_id: str) -> dict[str, Any]:
+    try:
+        return ok({}, delete_project_model_settings(PROJECT_ROOT, project_id))
+    except ValueError as exc:
+        return failed({}, "invalid_model_settings_scope", str(exc))
+
+
+@app.post("/v1/model/preferences/resolve")
+def model_preferences_resolve_api(body: dict[str, Any]) -> dict[str, Any]:
+    return ok(body, resolve_model_preferences_api(PROJECT_ROOT, body))
+
+
+@app.post("/v1/model/route")
+def model_route_with_settings_api(body: dict[str, Any]) -> dict[str, Any]:
+    result = route_with_model_settings_api(PROJECT_ROOT, body)
+    route = result.get("route") or {}
+    selected = route.get("selected") or {}
+    return ok(body, result, usage=route.get("estimated_usage"), cost=selected.get("estimated_cost"), route=route)
 
 
 @app.post("/v1/rules/evaluate")
