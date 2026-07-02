@@ -12,6 +12,7 @@ from providers.base import BaseProvider, ProviderError, normalize_usage, output_
 
 
 RESPONSES_PATH = "/responses"
+GENERIC_API_KEY_ENV = "MODEL_API_KEY"
 
 
 class OpenAIResponsesProvider(BaseProvider):
@@ -21,7 +22,8 @@ class OpenAIResponsesProvider(BaseProvider):
         super().__init__(model_instance=model_instance)
         runtime_config = self.model_instance.get("runtime_config") or {}
         self.base_url = (base_url or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
-        self.api_key_env = api_key_env or runtime_config.get("api_key_env") or "OPENAI_API_KEY"
+        configured_api_key_env = runtime_config.get("api_key_env") or "OPENAI_API_KEY"
+        self.api_key_env = configured_api_key_env if api_key_env in {None, GENERIC_API_KEY_ENV} else api_key_env
         self.model_name_env = runtime_config.get("model_name_env") or "OPENAI_MODEL"
         self.timeout = timeout
 
