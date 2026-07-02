@@ -46,16 +46,19 @@ class FoundationCoreServiceTests(unittest.TestCase):
 
     def test_model_router_selects_local_when_privacy_requires_local(self) -> None:
         instances = self.load_json("configs/model_instance_registry.json")
+        policy = self.load_json("configs/model_routing_policy.json")
         request = {"route_mode": "balanced", "required_capabilities": ["text.chat"], "privacy": {"local_only": True}, "input": [{"type": "text", "text": "demo"}]}
-        result = route_model(request, instances)
+        result = route_model(request, instances, policy=policy)
         self.assertEqual(result["selected_model_id"], "local.qwen2_5_1_5b_instruct")
         self.assertEqual(result["status"], "routed")
 
-    def test_model_router_returns_no_candidate_for_missing_modality(self) -> None:
+    def test_model_router_selects_multimodal_candidate_for_video(self) -> None:
         instances = self.load_json("configs/model_instance_registry.json")
+        policy = self.load_json("configs/model_routing_policy.json")
         request = {"route_mode": "balanced", "required_capabilities": ["video.understand"], "input": [{"type": "video", "uri": "file://demo.mp4", "duration_ms": 1000}]}
-        result = route_model(request, instances)
-        self.assertEqual(result["status"], "no_candidate")
+        result = route_model(request, instances, policy=policy)
+        self.assertEqual(result["status"], "routed")
+        self.assertEqual(result["selected_model_id"], "external.gemini.multimodal")
 
     def test_usage_ledger_writes_and_summarizes(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / "outputs") as tmpdir:
