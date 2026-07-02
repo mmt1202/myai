@@ -87,6 +87,42 @@ Body:
 
 Output: selected model, candidates, rejected candidates, fallback chain and estimated usage.
 
+## Model settings
+
+The model settings API manages runtime workspace/project model defaults. Runtime settings overlay `configs/model_routing_policy.json`.
+
+Runtime store:
+
+```text
+FOUNDATION_MODEL_SETTINGS_STORE=<settings_json_path>
+```
+
+Implemented endpoints:
+
+```text
+GET    /v1/model/settings
+GET    /v1/model/settings/workspaces/{workspace_id}
+PUT    /v1/model/settings/workspaces/{workspace_id}
+DELETE /v1/model/settings/workspaces/{workspace_id}
+GET    /v1/model/settings/projects/{project_id}
+PUT    /v1/model/settings/projects/{project_id}
+DELETE /v1/model/settings/projects/{project_id}
+POST   /v1/model/preferences/resolve
+POST   /v1/model/route
+```
+
+Settings body:
+
+```json
+{
+  "primary_model": "model.primary",
+  "fallback_models": ["model.backup"],
+  "metadata": {}
+}
+```
+
+Invalid workspace/project IDs return a failed envelope with code `invalid_model_settings_scope`.
+
 ## Memory
 
 Memory backend selection:
@@ -225,6 +261,7 @@ Direct media generation handlers live in `drama/generation_api.py`.
 - `request_id`: caller-supplied request id.
 - `trace_id`: distributed trace id; defaults to request id if omitted.
 - `run_id`: run-store safe id. It must not contain path separators or `..`.
+- `workspace_id` and `project_id` for model settings must use safe identifier characters only.
 
 ## Compatibility rule
 
