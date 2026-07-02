@@ -8,6 +8,7 @@ from typing import Any, Iterator
 from providers.base import BaseProvider, ProviderError, response_envelope
 from providers.local_text import LocalTextProvider
 from providers.openai_compatible import OpenAICompatibleProvider
+from providers.openai_responses import OpenAIResponsesProvider
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -25,7 +26,7 @@ def build_provider(
     model_instance: dict[str, Any],
     *,
     base_url: str | None = None,
-    api_key_env: str = "MODEL_API_KEY",
+    api_key_env: str | None = None,
     timeout: int = 120,
     model_path: str | None = None,
     adapter_path: str | None = None,
@@ -33,8 +34,10 @@ def build_provider(
 ) -> BaseProvider:
     provider = model_instance.get("provider")
     runtime = model_instance.get("runtime")
+    if runtime == "openai_responses":
+        return OpenAIResponsesProvider(model_instance, base_url=base_url, api_key_env=api_key_env, timeout=timeout)
     if provider == "openai_compatible" or runtime == "http_chat_completions":
-        return OpenAICompatibleProvider(model_instance, base_url=base_url, api_key_env=api_key_env, timeout=timeout)
+        return OpenAICompatibleProvider(model_instance, base_url=base_url, api_key_env=api_key_env or "MODEL_API_KEY", timeout=timeout)
     if provider == "local" or runtime == "transformers":
         return LocalTextProvider(model_instance, model_path=model_path, adapter_path=adapter_path, system_prompt_file=system_prompt_file)
     raise ProviderError("provider_not_supported", f"unsupported provider/runtime: {provider}/{runtime}")
@@ -46,7 +49,7 @@ def provider_for_request(
     *,
     model_id: str | None = None,
     base_url: str | None = None,
-    api_key_env: str = "MODEL_API_KEY",
+    api_key_env: str | None = None,
     timeout: int = 120,
 ) -> BaseProvider:
     selected_model = model_id or request.get("model_id") or request.get("model")
@@ -70,7 +73,7 @@ def generate_with_registry(
     *,
     model_id: str | None = None,
     base_url: str | None = None,
-    api_key_env: str = "MODEL_API_KEY",
+    api_key_env: str | None = None,
     timeout: int = 120,
 ) -> dict[str, Any]:
     provider = provider_for_request(request, registry, model_id=model_id, base_url=base_url, api_key_env=api_key_env, timeout=timeout)
@@ -83,7 +86,7 @@ def stream_generate_with_registry(
     *,
     model_id: str | None = None,
     base_url: str | None = None,
-    api_key_env: str = "MODEL_API_KEY",
+    api_key_env: str | None = None,
     timeout: int = 120,
 ) -> Iterator[dict[str, Any]]:
     provider = provider_for_request(request, registry, model_id=model_id, base_url=base_url, api_key_env=api_key_env, timeout=timeout)
@@ -96,7 +99,7 @@ def continuation_capability_with_registry(
     *,
     model_id: str | None = None,
     base_url: str | None = None,
-    api_key_env: str = "MODEL_API_KEY",
+    api_key_env: str | None = None,
     timeout: int = 120,
 ) -> dict[str, Any]:
     provider = provider_for_request(request, registry, model_id=model_id, base_url=base_url, api_key_env=api_key_env, timeout=timeout)
@@ -113,7 +116,7 @@ def continue_stream_with_tool_result_with_registry(
     stream_context: dict[str, Any] | None = None,
     model_id: str | None = None,
     base_url: str | None = None,
-    api_key_env: str = "MODEL_API_KEY",
+    api_key_env: str | None = None,
     timeout: int = 120,
 ) -> Iterator[dict[str, Any]]:
     provider = provider_for_request(request, registry, model_id=model_id, base_url=base_url, api_key_env=api_key_env, timeout=timeout)
@@ -126,7 +129,7 @@ def main() -> int:
     parser.add_argument("--instances", default="configs/model_instance_registry.json")
     parser.add_argument("--model-id", default=None)
     parser.add_argument("--base-url", default=None)
-    parser.add_argument("--api-key-env", default="MODEL_API_KEY")
+    parser.add_argument("--api-key-env", default=None)
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--stream", action="store_true")
     parser.add_argument("--continuation-capability", action="store_true")
