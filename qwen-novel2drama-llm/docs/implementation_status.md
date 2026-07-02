@@ -8,6 +8,7 @@
 
 - 文本生成基础运行时。
 - router、token counter、cost estimator、usage ledger、provider usage reconciliation。
+- configurable primary model routing：主模型不写死，支持 request / env / project / workspace / task / global 多层选择。
 - memory、rules、skills、MCP-style adapter。
 - auth、audit、rate limit、workspace quota。
 - file/SQLite/Postgres run store 与 quota backend。
@@ -16,6 +17,11 @@
 - provider continuation、provider smoke、local/openai-compatible provider contracts。
 - API quota、health/readiness、queue observability、deployment profile、secret resolver、metrics、backup plan、preflight、TLS template。
 - `configs/model_versions.json`：active model version 已注册，不再为空。
+- `configs/model_routing_policy.json`：可配置 primary/fallback/task route 策略已完成。
+- `services/model_preferences.py`：request/env/project/workspace/task/global 主模型解析已完成。
+- `inference/model_router.py`：已接入 preference boost、fallback chain、privacy/context/output/cost guard。
+- `configs/model_instance_registry.json`：已新增 `external.openai.primary` 作为可选 primary candidate，同时保留 Claude/Gemini/DeepSeek/Qwen/local 等候选。
+- `docs/CONFIGURABLE_PRIMARY_MODEL.md`：可配置主模型路线已记录。
 - `docs/FOUNDATION_API_CONTRACT.md`：Foundation API 契约已固定。
 - `docs/FOUNDATION_BOUNDARY.md`：Foundation 与 ForgePilot 职责边界已固定。
 - `scripts/run_checks.py`：核心目录 compile、skills validate、MCP validate、router smoke 已纳入检查。
@@ -64,6 +70,10 @@
 ```text
 P0_contracts_implemented_v1 = true
 P1_foundation_runtime_implemented_v1 = true
+P1_configurable_primary_model_policy_implemented_v1 = true
+P1_request_workspace_project_task_model_override_implemented_v1 = true
+P1_model_route_privacy_context_cost_guards_implemented_v1 = true
+P1_model_fallback_chain_implemented_v1 = true
 P1_hardening_implemented_v1 = true
 P1_model_versions_registry_implemented_v1 = true
 P1_foundation_api_contract_documented_v1 = true
@@ -107,9 +117,12 @@ implementation_completed = false
 5. 真实 provider 账单文件需要接入具体平台导出格式。
 6. 平台专属媒体网关需要具体平台 endpoint、鉴权、额度、callback 和资产存储桶。
 7. 外部向量数据库和真实 embedding provider 尚未接入。
+8. OpenAI Responses provider 的真实 SDK 调用仍需按实际账号、模型和密钥配置做 smoke test。
 
 ## 禁止误判
 
+- 可配置主模型完成，不等于所有 provider 的账号、额度、模型名和真实调用都已配置成功。
+- `external.openai.primary` 只是一个可配置 primary candidate，不是系统写死的唯一主模型。
 - 仓库级 cloud profile 完成，不等于已经对某个云账号执行 `terraform apply`。
 - Managed secret contract 完成，不等于真实云 secret manager 已经授权可读。
 - WAF/CDN/SLO profile 完成，不等于真实域名和证书已经绑定。
