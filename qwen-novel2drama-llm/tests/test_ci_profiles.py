@@ -26,6 +26,8 @@ class CIProfilesTests(unittest.TestCase):
         for test_name in [
             "tests.test_foundation_core_services",
             "tests.test_model_versions",
+            "tests.test_model_preferences",
+            "tests.test_configurable_model_router",
             "tests.test_api_smoke",
             "tests.test_memory_store",
             "tests.test_sqlite_memory_store",
