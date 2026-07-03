@@ -83,17 +83,31 @@ def response_envelope(
     }
 
 
+def nested_int(raw: dict[str, Any], *paths: tuple[str, ...]) -> int:
+    for path in paths:
+        value: Any = raw
+        for key in path:
+            if not isinstance(value, dict):
+                value = None
+                break
+            value = value.get(key)
+        if value is not None:
+            return int(value or 0)
+    return 0
+
+
 def normalize_usage(raw_usage: dict[str, Any] | None) -> dict[str, Any]:
     raw = raw_usage or {}
     input_tokens = int(raw.get("prompt_tokens") or raw.get("input_tokens") or 0)
     output_tokens = int(raw.get("completion_tokens") or raw.get("output_tokens") or 0)
-    reasoning_tokens = int(raw.get("reasoning_tokens") or 0)
+    reasoning_tokens = int(raw.get("reasoning_tokens") or 0) or nested_int(raw, ("output_tokens_details", "reasoning_tokens"), ("completion_tokens_details", "reasoning_tokens"))
+    cached_input_tokens = int(raw.get("cached_input_tokens") or 0) or nested_int(raw, ("input_tokens_details", "cached_tokens"), ("prompt_tokens_details", "cached_tokens"))
     total_tokens = int(raw.get("total_tokens") or input_tokens + output_tokens + reasoning_tokens)
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "reasoning_tokens": reasoning_tokens,
-        "cached_input_tokens": int(raw.get("cached_input_tokens") or 0),
+        "cached_input_tokens": cached_input_tokens,
         "total_tokens": total_tokens,
     }
 
