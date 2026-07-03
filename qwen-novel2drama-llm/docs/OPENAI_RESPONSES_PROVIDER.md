@@ -23,6 +23,8 @@ provider = openai
 
 When `providers.factory.build_provider()` sees `runtime=openai_responses`, it returns `OpenAIResponsesProvider`.
 
+OpenAI is only a provider candidate. It is not hard-coded as the only primary model.
+
 ## Environment
 
 ```text
@@ -56,16 +58,56 @@ max_output_tokens
 temperature
 tools
 tool_choice
+max_tool_calls
+parallel_tool_calls
+previous_response_id
+conversation
+background
+include
+prompt
+prompt_cache_key
+prompt_cache_retention
+reasoning
+safety_identifier
+service_tier
 response_format
+text
+top_logprobs
+top_p
+truncation
 metadata
 store
 stream
 stream_options
+stream_include_obfuscation
+```
+
+## Usage mapping
+
+The adapter normalizes both classic and Responses-style usage fields:
+
+```text
+input_tokens / prompt_tokens
+output_tokens / completion_tokens
+output_tokens_details.reasoning_tokens
+completion_tokens_details.reasoning_tokens
+input_tokens_details.cached_tokens
+prompt_tokens_details.cached_tokens
+```
+
+Normalized output keeps:
+
+```text
+input_tokens
+output_tokens
+reasoning_tokens
+cached_input_tokens
+total_tokens
 ```
 
 ## Native streaming
 
-The adapter now supports provider-native Responses streaming:
+The adapter supports provider-native Responses streaming:
 
 ```text
 request stream=true -> provider payload stream=true
