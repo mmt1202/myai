@@ -62,7 +62,7 @@ class OpenAIResponsesProvider(BaseProvider):
                 payload["image_url"] = str(block.get("image_url") or block.get("uri") or block.get("url") or "")
             return payload
         if block_type in {"file", "url"}:
-            payload = {"type": "input_file", "detail": block.get("detail") or "low"}
+            payload = {"type": "input_file"}
             if block.get("file_id"):
                 payload["file_id"] = str(block["file_id"])
             elif block.get("file_data"):
@@ -92,6 +92,30 @@ class OpenAIResponsesProvider(BaseProvider):
         items.append({"role": "user", "content": content, "type": "message"})
         return items
 
+    def copy_passthrough_fields(self, payload: dict[str, Any], request: dict[str, Any]) -> None:
+        passthrough = [
+            "background",
+            "conversation",
+            "include",
+            "max_tool_calls",
+            "parallel_tool_calls",
+            "previous_response_id",
+            "prompt",
+            "prompt_cache_key",
+            "prompt_cache_retention",
+            "reasoning",
+            "safety_identifier",
+            "service_tier",
+            "tool_choice",
+            "tools",
+            "top_logprobs",
+            "top_p",
+            "truncation",
+        ]
+        for key in passthrough:
+            if key in request and request[key] is not None:
+                payload[key] = request[key]
+
     def build_payload(self, request: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {"model": request.get("model") or self.provider_model(), "input": self.build_input(request)}
         if request.get("instructions"):
@@ -100,16 +124,15 @@ class OpenAIResponsesProvider(BaseProvider):
             payload["max_output_tokens"] = int(request["max_output_tokens"])
         if request.get("temperature") is not None:
             payload["temperature"] = float(request["temperature"])
-        if request.get("tools"):
-            payload["tools"] = request["tools"]
-        if request.get("tool_choice"):
-            payload["tool_choice"] = request["tool_choice"]
         if request.get("response_format"):
             payload["text"] = {"format": request["response_format"]}
+        if request.get("text") and isinstance(request.get("text"), dict):
+            payload["text"] = request["text"]
         if request.get("metadata"):
             payload["metadata"] = request["metadata"]
         if request.get("store") is not None:
             payload["store"] = bool(request["store"])
+        self.copy_passthrough_fields(payload, request)
         if request.get("stream"):
             payload["stream"] = True
             if request.get("stream_options"):
