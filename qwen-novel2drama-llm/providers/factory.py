@@ -37,7 +37,7 @@ def build_provider(
     if runtime == "openai_responses":
         return OpenAIResponsesProvider(model_instance, base_url=base_url, api_key_env=api_key_env, timeout=timeout)
     if provider == "openai_compatible" or runtime == "http_chat_completions":
-        return OpenAICompatibleProvider(model_instance, base_url=base_url, api_key_env=api_key_env or "MODEL_API_KEY", timeout=timeout)
+        return OpenAICompatibleProvider(model_instance, base_url=base_url, api_key_env=api_key_env, timeout=timeout)
     if provider == "local" or runtime == "transformers":
         return LocalTextProvider(model_instance, model_path=model_path, adapter_path=adapter_path, system_prompt_file=system_prompt_file)
     raise ProviderError("provider_not_supported", f"unsupported provider/runtime: {provider}/{runtime}")
