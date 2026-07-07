@@ -33,6 +33,8 @@ class CIProfilesTests(unittest.TestCase):
             "tests.test_configurable_model_router",
             "tests.test_openai_responses_provider",
             "tests.test_openai_responses_smoke",
+            "tests.test_openai_compatible_provider",
+            "tests.test_provider_candidate_smoke",
             "tests.test_api_smoke",
             "tests.test_memory_store",
             "tests.test_sqlite_memory_store",
@@ -64,11 +66,13 @@ class CIProfilesTests(unittest.TestCase):
         ]:
             self.assertIn(test_name, command)
 
-    def test_provider_profiles_include_openai_responses_tests(self) -> None:
+    def test_provider_profiles_include_provider_candidate_tests(self) -> None:
         adapter_command = unittest_command(PROFILES["provider-adapter"]) or ""
         smoke_command = unittest_command(PROFILES["provider-smoke"]) or ""
         self.assertIn("tests.test_openai_responses_provider", adapter_command)
+        self.assertIn("tests.test_openai_compatible_provider", adapter_command)
         self.assertIn("tests.test_openai_responses_smoke", smoke_command)
+        self.assertIn("tests.test_provider_candidate_smoke", smoke_command)
 
     def test_api_server_profile_has_api_requirements(self) -> None:
         profile = PROFILES["api-server"]
