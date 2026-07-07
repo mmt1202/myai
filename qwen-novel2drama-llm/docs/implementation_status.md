@@ -17,6 +17,8 @@
 - Postgres migration runner/history。
 - provider continuation、provider smoke、local/openai-compatible provider contracts。
 - OpenAI Responses provider adapter：`runtime=openai_responses` 已有专用 provider、dry-run、完整 Responses request controls payload 映射、usage 归一化、原生 SSE stream、smoke script。
+- OpenAI-compatible provider adapter：已按 registry runtime_config 读取 provider-specific env，支持 dry-run/live smoke、stream、tool call delta、usage 归一化。
+- 通用 provider candidate smoke：`scripts/provider_candidate_smoke.py` 已完成。
 - API quota、health/readiness、queue observability、deployment profile、secret resolver、metrics、backup plan、preflight、TLS template。
 - `configs/model_versions.json`：active model version 已注册，不再为空。
 - `configs/model_routing_policy.json`：可配置 primary/fallback/task route 策略已完成。
@@ -26,10 +28,13 @@
 - `inference/api_server.py`：已暴露 `/v1/model/settings/*`、`/v1/model/preferences/resolve`、`/v1/model/route`。
 - `inference/model_router.py`：已接入 preference boost、fallback chain、privacy/context/output/cost guard。
 - `providers/openai_responses.py`：OpenAI Responses adapter、full request controls、nested usage normalization、provider-native stream 已完成。
+- `providers/openai_compatible.py`：DeepSeek/Qwen/Claude/Gemini gateway-compatible adapter contract 已完成。
+- `providers/factory.py`：已按 registry runtime 选择 provider，并保留 provider-specific env 配置。
 - `scripts/openai_responses_smoke.py`：OpenAI Responses dry-run/live、stream/non-stream smoke 已完成。
 - `configs/model_instance_registry.json`：已新增 `external.openai.primary` 作为可选 primary candidate，同时保留 Claude/Gemini/DeepSeek/Qwen/local 等候选。
 - `docs/CONFIGURABLE_PRIMARY_MODEL.md`：可配置主模型路线已记录。
 - `docs/OPENAI_RESPONSES_PROVIDER.md`：OpenAI Responses provider contract 已记录。
+- `docs/PROVIDER_CANDIDATE_ADAPTERS.md`：通用 provider candidate adapter 标准已记录。
 - `docs/FOUNDATION_API_CONTRACT.md`：Foundation API 契约已固定。
 - `docs/FOUNDATION_BOUNDARY.md`：Foundation 与 ForgePilot 职责边界已固定。
 - `scripts/run_checks.py`：核心目录 compile、skills validate、MCP validate、router smoke 已纳入检查。
@@ -53,7 +58,7 @@
 - `services/audit_query.py`：audit query/export/retention。
 - `scripts/deploy_profile.py`：deploy profile validator。
 - `scripts/cloud_deploy_profile.py`、`deploy/terraform/main.tf`、`deploy/k8s/README.md`、`deploy/security/security_profile.yaml`、`deploy/observability/slo.yaml`：云部署、Terraform、安全、WAF/CDN/SLO profile 已完成仓库级模板与校验。
-- `services/managed_secret_resolver.py`：AWS/GCP/Azure/Vault/env managed secret resolver contract 已完成。
+- `services/managed_secret_resolver.py`：managed secret resolver contract 已完成。
 - `external_queue/*`：外部队列抽象、retry/dead-letter、跨区域调度策略已完成。
 - `billing/*`：provider usage record loading、reconciliation、workspace export 已完成。
 
@@ -86,6 +91,9 @@ P1_openai_responses_provider_smoke_implemented_v1 = true
 P1_openai_responses_native_streaming_implemented_v1 = true
 P1_openai_responses_full_request_controls_implemented_v1 = true
 P1_openai_responses_usage_mapping_implemented_v1 = true
+P1_openai_compatible_provider_env_config_implemented_v1 = true
+P1_openai_compatible_provider_streaming_implemented_v1 = true
+P1_generic_provider_candidate_smoke_implemented_v1 = true
 P1_request_workspace_project_task_model_override_implemented_v1 = true
 P1_model_route_privacy_context_cost_guards_implemented_v1 = true
 P1_model_fallback_chain_implemented_v1 = true
@@ -127,21 +135,22 @@ implementation_completed = false
 
 1. 真实云账号中的 Kubernetes cluster / Terraform apply 尚未执行。
 2. 真实域名、证书、WAF、CDN 尚未绑定到云平台。
-3. 真实 AWS/GCP/Azure/Vault SDK 调用需要具体云环境和权限。
+3. 真实 managed secret backend 需要具体云环境和权限。
 4. 真实外部 MQ adapter 需要选择 Redis/RabbitMQ/SQS/PubSub 之一并提供连接信息。
 5. 真实 provider 账单文件需要接入具体平台导出格式。
 6. 平台专属媒体网关需要具体平台 endpoint、鉴权、额度、callback 和资产存储桶。
 7. 外部向量数据库和真实 embedding provider 尚未接入。
-8. OpenAI Responses provider 的真实 SDK 调用仍需按实际账号、模型和密钥配置做 smoke test。
+8. 各真实 LLM provider 的 live smoke 仍需按实际账号、模型、base URL、认证变量配置后执行。
 
 ## 禁止误判
 
-- OpenAI Responses adapter 完成，不等于真实 OpenAI 账号、模型名、API key、项目限额和账单已经配置。
-- OpenAI Responses adapter 是 provider candidate，不是系统唯一主模型。
-- 可配置主模型完成，不等于所有 provider 的账号、额度、模型名和真实调用都已配置成功。
+- Provider adapter 完成，不等于真实 provider 账号、模型名、base URL、额度和网关策略已经配置。
+- OpenAI-compatible Claude/Gemini 当前代表 gateway-compatible endpoint，不等于 Claude/Gemini 原生 SDK 已完成。
+- 所有 provider adapter 都只是 provider candidates，不是系统唯一主模型。
+- 可配置主模型完成，不等于所有 provider 的真实调用都已验证成功。
 - `external.openai.primary` 只是一个可配置 primary candidate，不是系统写死的唯一主模型。
 - 仓库级 cloud profile 完成，不等于已经对某个云账号执行 `terraform apply`。
-- Managed secret contract 完成，不等于真实云 secret manager 已经授权可读。
+- Managed secret contract 完成，不等于真实 secret manager 已经授权可读。
 - WAF/CDN/SLO profile 完成，不等于真实域名和证书已经绑定。
 - External queue contract 完成，不等于 Redis/RabbitMQ/SQS/PubSub 已经部署。
 - Billing usage reconciliation 完成，不等于已经接入所有第三方平台真实账单格式。
