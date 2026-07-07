@@ -11,15 +11,36 @@ from typing import Any, Iterator
 from providers.base import BaseProvider, ProviderError, continuation_capability, normalize_usage, output_text_block, provider_stream_event, response_envelope, text_from_content_blocks
 from providers.realtime_base import PROVIDER_NATIVE_PROTOCOLS, adapter_for_protocol
 
+GENERIC_API_KEY_ENV = "MODEL_API_KEY"
+GENERIC_BASE_URL_ENV = "MODEL_BASE_URL"
+GENERIC_MODEL_ENV = "MODEL_NAME"
+
 
 class OpenAICompatibleProvider(BaseProvider):
     provider_name = "openai_compatible"
 
-    def __init__(self, model_instance: dict[str, Any] | None = None, *, base_url: str | None = None, api_key_env: str = "MODEL_API_KEY", timeout: int = 120) -> None:
+    def __init__(self, model_instance: dict[str, Any] | None = None, *, base_url: str | None = None, api_key_env: str | None = None, timeout: int = 120) -> None:
         super().__init__(model_instance=model_instance)
-        self.base_url = (base_url or os.environ.get("MODEL_BASE_URL") or "http://localhost:8000/v1").rstrip("/")
-        self.api_key_env = api_key_env
+        runtime_config = self.model_instance.get("runtime_config") or {}
+        configured_base_url_env = runtime_config.get("base_url_env") or GENERIC_BASE_URL_ENV
+        configured_api_key_env = runtime_config.get("api_key_env") or GENERIC_API_KEY_ENV
+        self.model_name_env = runtime_config.get("model_name_env") or GENERIC_MODEL_ENV
+        self.base_url_env = configured_base_url_env
+        self.api_key_env = configured_api_key_env if api_key_env in {None, GENERIC_API_KEY_ENV} else api_key_env
+        self.base_url = (base_url or os.environ.get(self.base_url_env) or os.environ.get(GENERIC_BASE_URL_ENV) or "http://localhost:8000/v1").rstrip("/")
         self.timeout = timeout
+
+    def provider_model(self) -> str:
+        configured = os.environ.get(self.model_name_env)
+        if configured:
+            return configured
+        model_name = str(self.model_instance.get("model_name") or "")
+        if model_name.startswith("${") and model_name.endswith("}"):
+            return self.model_id()
+        return model_name or self.model_id()
+
+    def requires_api_key(self) -> bool:
+        return self.model_instance.get("provider") != "local" and not self.base_url.startswith("http://localhost") and not self.base_url.startswith("http://127.0.0.1")
 
     def continuation_capability(self) -> dict[str, Any]:
         capability = continuation_capability(self.model_instance)
@@ -48,6 +69,9 @@ class OpenAICompatibleProvider(BaseProvider):
         }
         if request.get("max_output_tokens") is not None:
             payload["max_tokens"] = int(request["max_output_tokens"])
+        for key in ("top_p", "frequency_penalty", "presence_penalty", "stop", "response_format", "seed", "metadata"):
+            if request.get(key) is not None:
+                payload[key] = request[key]
         if request.get("tools"):
             payload["tools"] = request["tools"]
         if request.get("tool_choice"):
@@ -78,6 +102,16 @@ class OpenAICompatibleProvider(BaseProvider):
     def is_dry_run(self, request: dict[str, Any]) -> bool:
         return bool(request.get("dry_run") or request.get("dry_run_provider"))
 
+    def provider_env(self) -> dict[str, Any]:
+        return {
+            "base_url_env": self.base_url_env,
+            "base_url_configured": bool(os.environ.get(self.base_url_env)),
+            "api_key_env": self.api_key_env,
+            "api_key_configured": bool(os.environ.get(self.api_key_env)),
+            "model_name_env": self.model_name_env,
+            "model_name_configured": bool(os.environ.get(self.model_name_env)),
+        }
+
     def parse_chat_response(self, data: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
         choices = data.get("choices") or []
         if not choices:
@@ -99,12 +133,14 @@ class OpenAICompatibleProvider(BaseProvider):
         if self.is_dry_run(request):
             return response_envelope(
                 status="ok",
-                output={"dry_run": True, "provider_payload": payload, "url": f"{self.base_url}/chat/completions"},
+                output={"dry_run": True, "provider_payload": payload, "url": f"{self.base_url}/chat/completions", "env": self.provider_env()},
                 request_id_value=request.get("request_id"),
                 trace_id=request.get("trace_id"),
                 model={"model_id": self.model_id(), "provider": self.provider_name, "provider_model": payload["model"]},
                 warnings=["dry_run_no_provider_call"],
             )
+        if self.requires_api_key() and not os.environ.get(self.api_key_env):
+            raise ProviderError("provider_auth_missing", f"missing API key env: {self.api_key_env}", retryable=False)
         http_request = self.build_http_request(payload)
         try:
             with urllib.request.urlopen(http_request, timeout=self.timeout) as response:
@@ -222,7 +258,7 @@ class OpenAICompatibleProvider(BaseProvider):
             request_id_value=request_id_value,
             trace_id=trace_id,
             model=model_info,
-            metadata={"provider": self.provider_name, "url": f"{self.base_url}/chat/completions"},
+            metadata={"provider": self.provider_name, "url": f"{self.base_url}/chat/completions", "env": self.provider_env()},
         )
         if self.is_dry_run(request):
             yield provider_stream_event(
@@ -239,11 +275,13 @@ class OpenAICompatibleProvider(BaseProvider):
                 request_id_value=request_id_value,
                 trace_id=trace_id,
                 model=model_info,
-                output={"dry_run": True, "provider_payload": payload, "url": f"{self.base_url}/chat/completions"},
+                output={"dry_run": True, "provider_payload": payload, "url": f"{self.base_url}/chat/completions", "env": self.provider_env()},
                 done=True,
                 metadata={"dry_run": True},
             )
             return
+        if self.requires_api_key() and not os.environ.get(self.api_key_env):
+            raise ProviderError("provider_auth_missing", f"missing API key env: {self.api_key_env}", retryable=False)
         http_request = self.build_http_request(payload)
         collected: list[str] = []
         tool_call_buffer: dict[int, dict[str, Any]] = {}
@@ -330,7 +368,7 @@ def main() -> int:
     parser.add_argument("--request", required=True)
     parser.add_argument("--model-instance", default=None)
     parser.add_argument("--base-url", default=None)
-    parser.add_argument("--api-key-env", default="MODEL_API_KEY")
+    parser.add_argument("--api-key-env", default=None)
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--stream", action="store_true")
     parser.add_argument("--output", default=None)
